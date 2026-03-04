@@ -43,6 +43,7 @@ RUN pip install --no-cache-dir \
     tree-sitter-c-sharp \
     typesense \
     watchdog \
+    pathspec \
     uvicorn
 
 # Copy application code
