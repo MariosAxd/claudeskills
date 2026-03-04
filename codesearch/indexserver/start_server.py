@@ -16,19 +16,13 @@ import time
 import subprocess
 import argparse
 import urllib.request
-import json
 from pathlib import Path
 
 _base = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if _base not in sys.path:
     sys.path.insert(0, _base)
 
-from codesearch.indexserver.config import API_KEY, PORT, TYPESENSE_VERSION
-
-TAR_URL = (
-    f"https://dl.typesense.org/releases/{TYPESENSE_VERSION}/"
-    f"typesense-server-{TYPESENSE_VERSION}-linux-amd64.tar.gz"
-)
+from codesearch.indexserver.config import API_KEY, PORT
 
 _HOME    = Path.home()
 _RUN_DIR = _HOME / ".local" / "typesense"
@@ -80,38 +74,16 @@ def is_running() -> bool:
     return result == "yes"
 
 
-def ensure_binary():
-    exists = _sh_out(f"test -x {BIN_PATH} && echo ok || echo missing")
-    if exists == "ok":
-        return
-    print(f"Downloading Typesense {TYPESENSE_VERSION} to ~/.local/typesense/...")
-    result = _sh(
-        f"mkdir -p ~/.local/typesense && "
-        f"curl -L --progress-bar '{TAR_URL}' | tar -xz -C ~/.local/typesense/",
-        check=False
-    )
-    if result.returncode != 0:
-        print("ERROR: Failed to download/extract Typesense binary")
-        sys.exit(1)
-    actual = _sh_out(
-        "find ~/.local/typesense -name 'typesense-server' -type f 2>/dev/null | head -1"
-    )
-    if not actual:
-        print("ERROR: typesense-server binary not found after extraction")
-        sys.exit(1)
-    canonical = _sh_out("echo ~/.local/typesense/typesense-server")
-    if actual != canonical:
-        _sh(f"mv '{actual}' '{canonical}'", check=True)
-    _sh(f"chmod +x '{canonical}'", check=True)
-    print("Binary ready.")
-
-
 def start():
     if is_running():
         print(f"Typesense is already running on port {PORT}.")
         return
 
-    ensure_binary()
+    exists = _sh_out(f"test -x {BIN_PATH} && echo ok || echo missing")
+    if exists != "ok":
+        print(f"ERROR: Typesense binary not found at {BIN_PATH}.")
+        print(f"       Run setup_mcp.cmd to install all dependencies.")
+        sys.exit(1)
 
     launch = (
         f"mkdir -p {DATA_PATH} && "
