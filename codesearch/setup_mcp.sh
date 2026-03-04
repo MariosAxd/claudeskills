@@ -25,21 +25,31 @@ fi
 # ── Verify prerequisites ───────────────────────────────────────────────────────
 if ! command -v python3 &>/dev/null; then
     echo "ERROR: python3 not found in WSL."
-    echo "       Fix: sudo apt-get install -y python3 python3-venv python3-pip"
-    exit 1
-fi
-if ! python3 -m venv --help &>/dev/null 2>&1; then
-    echo "ERROR: python3-venv module not available."
-    echo "       Fix: sudo apt-get install -y python3-venv"
-    exit 1
-fi
-if ! command -v curl &>/dev/null; then
-    echo "ERROR: curl not found in WSL."
-    echo "       Fix: sudo apt-get install -y curl"
+    echo "       Fix:"
+    echo "         sudo apt-get update"
+    echo "         sudo apt-get install -y python3 python3-pip"
     exit 1
 fi
 
+# ensurepip is missing when the version-specific python3.X-venv package is absent
+# (separate package on Debian/Ubuntu, e.g. python3.12-venv)
 PY=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+if ! python3 -c "import ensurepip" &>/dev/null 2>&1; then
+    echo "ERROR: python3-venv not available (ensurepip missing for Python $PY)."
+    echo "       Fix:"
+    echo "         sudo apt-get update"
+    echo "         sudo apt-get install -y python${PY}-venv"
+    exit 1
+fi
+
+if ! command -v curl &>/dev/null; then
+    echo "ERROR: curl not found in WSL."
+    echo "       Fix:"
+    echo "         sudo apt-get update"
+    echo "         sudo apt-get install -y curl"
+    exit 1
+fi
+
 echo "  Python $PY  |  Typesense $TYPESENSE_VERSION"
 
 # ── [WSL 1/3] MCP client venv ─────────────────────────────────────────────────
