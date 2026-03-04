@@ -2,13 +2,12 @@
 :: Register (or unregister) the codesearch MCP server with Claude Code.
 ::
 :: Usage:
-::   setup_mcp.cmd <src-dir>         -- install: write config.json, create venvs (WSL + Windows), register MCP
+::   setup_mcp.cmd <src-dir>         -- install: write config.json, create WSL venvs, register MCP
 ::   setup_mcp.cmd --uninstall       -- unregister MCP server (venvs are left in place)
 setlocal
 
 set "REPO=%~dp0"
 set "REPO=%REPO:~0,-1%"
-set "VENV=%REPO%\.venv"
 
 :: ── Uninstall path ─────────────────────────────────────────────────────────
 if /i "%~1"=="--uninstall" (
@@ -73,7 +72,7 @@ set "SRC_DIR=%~1"
 :: then run: ts.cmd index --root <name> --reset
 ::
 echo.
-echo [1/5] Writing codesearch/config.json ...
+echo [1/4] Writing codesearch/config.json ...
 set "SRC_FWD=%SRC_DIR:\=/%"
 
 if exist "%REPO%\config.json" (
@@ -108,9 +107,9 @@ echo   port          = %PORT%
 
 :step2
 
-:: ── [2/5] Create WSL venvs (mcp-venv + indexserver-venv) ──────────────────
+:: ── [2/4] Create WSL venvs (mcp-venv + indexserver-venv) ──────────────────
 echo.
-echo [2/5] Creating WSL venvs via setup_mcp.sh ...
+echo [2/4] Creating WSL venvs via setup_mcp.sh ...
 for /f "usebackq delims=" %%P in (`wsl.exe wslpath -u "%REPO%"`) do set "WSL_REPO=%%P"
 if "%WSL_REPO%"=="" (
     echo ERROR: Could not convert repo path to WSL path.
@@ -123,35 +122,19 @@ if errorlevel 1 (
     exit /b 1
 )
 
-:: ── [3/5] Create Windows venv ──────────────────────────────────────────────
+:: ── [3/4] Register MCP ────────────────────────────────────────────────────
 echo.
-echo [3/5] Creating Windows venv at %VENV% ...
-python -m venv "%VENV%"
-if errorlevel 1 (
-    echo ERROR: Failed to create venv. Is Python 3.10+ in PATH?
-    exit /b 1
-)
-echo   Installing packages ...
-"%VENV%\Scripts\pip.exe" install --quiet --upgrade mcp tree-sitter tree-sitter-c-sharp
-if errorlevel 1 (
-    echo ERROR: pip install failed.
-    exit /b 1
-)
-echo   Packages installed.
-
-:: ── [4/5] Register MCP ────────────────────────────────────────────────────
-echo.
-echo [4/5] Registering MCP server with Claude Code ...
+echo [3/4] Registering MCP server with Claude Code ...
 claude mcp remove --scope user tscodesearch >nul 2>&1
-claude mcp add --scope user tscodesearch -- "%VENV%\Scripts\python.exe" "%REPO%\mcp_server.py"
+claude mcp add --scope user tscodesearch -- wsl.exe bash -l "%WSL_REPO%/mcp.sh"
 if errorlevel 1 (
     echo ERROR: Failed to register MCP server.
     exit /b 1
 )
 
-:: ── [5/5] Start indexserver ───────────────────────────────────────────────
+:: ── [4/4] Start indexserver ───────────────────────────────────────────────
 echo.
-echo [5/5] Starting indexserver ^(Typesense + watcher + indexer^) ...
+echo [4/4] Starting indexserver ^(Typesense + watcher + indexer^) ...
 call "%REPO%\ts.cmd" start
 if errorlevel 1 (
     echo ERROR: Failed to start indexserver.

@@ -4,7 +4,7 @@ MCP server for code search.
 Exposes Typesense full-text search and tree-sitter C# structural queries
 as native Claude tools — no copy-paste, results go straight into context.
 
-Runs via Windows Python (claudeskills/.venv).
+Runs via WSL Python (mcp.sh → ~/.local/mcp-venv, requires Python 3.10+).
 Registered with:  setup_mcp.cmd  (run once from repo root)
 
 Restart / reload instructions:
