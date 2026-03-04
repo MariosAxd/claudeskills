@@ -73,7 +73,7 @@ def main():
             data = _get(f"/collections/{c}")
             ndocs = data.get("num_documents", 0)
             ok = ndocs > 0
-            hint = f" — run: ts index --root {n} --reset" if not ok else ""
+            hint = f" — run: ts index --root {n} --resethard" if not ok else ""
             return ok, f"{ndocs:,} docs in '{c}'{hint}"
 
         results.append(_check(f"Collection [{root_name}]", _collection))

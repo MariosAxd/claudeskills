@@ -3,8 +3,8 @@ Index source files into Typesense.
 Uses tree-sitter to extract class/interface/method/property symbols.
 
 Usage:
-    python indexer.py [--reset]
-    python indexer.py --src /path/to/src --collection my_collection --reset
+    python indexer.py [--resethard]
+    python indexer.py --src /path/to/src --collection my_collection --resethard
 """
 
 import os
@@ -99,7 +99,7 @@ def build_schema(collection_name: str) -> dict:
         # Split tokens on C# syntax characters so that parameter types and
         # generic type arguments are individually searchable.
         # e.g. "Task<Widget> GetAsync(int id)"  →  Task  Widget  GetAsync  int  id
-        # Requires ts index --reset to recreate the collection with the new schema.
+        # Requires ts index --resethard to recreate the collection with the new schema.
         "token_separators": ["(", ")", "<", ">", "[", "]", ","],
     }
 
@@ -513,17 +513,24 @@ def get_client():
 def ensure_collection(client, reset=False, collection=None):
     coll_name = collection or COLLECTION
     schema = build_schema(coll_name)
+
+    exists = True
     try:
         client.collections[coll_name].retrieve()
-        if reset:
-            print(f"Dropping existing collection '{coll_name}'...")
-            client.collections[coll_name].delete()
-            raise Exception("deleted")
-        print(f"Collection '{coll_name}' already exists.")
     except Exception:
+        exists = False
+
+    if exists and reset:
+        print(f"Dropping existing collection '{coll_name}'...")
+        client.collections[coll_name].delete()
+        exists = False
+
+    if not exists:
         print(f"Creating collection '{coll_name}'...")
         client.collections.create(schema)
         print("Collection created.")
+    else:
+        print(f"Collection '{coll_name}' already exists.")
 
 
 # ---------------------------------------------------------------------------
@@ -677,7 +684,7 @@ def _flush(client, docs, verbose, collection=None):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="Index source files into Typesense")
-    ap.add_argument("--reset", action="store_true",
+    ap.add_argument("--resethard", action="store_true",
                     help="Drop and recreate the collection first")
     ap.add_argument("--src", default=_SRC_ROOT_NATIVE,
                     help=f"Root directory to index (default: {_SRC_ROOT_NATIVE})")
@@ -698,5 +705,5 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"Cannot retrieve index stats: {e}")
     else:
-        run_index(src_root=args.src, reset=args.reset, verbose=args.verbose,
+        run_index(src_root=args.src, reset=args.resethard, verbose=args.verbose,
                   collection=coll)

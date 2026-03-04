@@ -22,7 +22,9 @@ def _read_config() -> dict:
 
 _CONFIG = _read_config()
 
-PORT: int = int(_CONFIG.get("port", 8108))
+if "port" not in _CONFIG:
+    raise RuntimeError(f"'port' is required in {_CONFIG_FILE}")
+PORT: int = int(_CONFIG["port"])
 API_KEY: str = _CONFIG.get("api_key", "codesearch-local")
 
 # ── Roots ─────────────────────────────────────────────────────────────────────
