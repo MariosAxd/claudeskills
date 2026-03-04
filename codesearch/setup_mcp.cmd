@@ -26,19 +26,18 @@ if /i "%~1"=="--uninstall" (
 if "%~1"=="" (
     echo Usage: setup_mcp.cmd ^<src-dir^> [api-key]
     echo   src-dir  Windows path to the source tree to index ^(e.g. C:\myproject\src^)
-    echo   api-key  Typesense API key ^(default: codesearch-local^)
+    echo   api-key  Typesense API key ^(optional; random 40-char hex key generated if omitted^)
     exit /b 1
 )
 
 set "SRC_DIR=%~1"
-set "API_KEY=codesearch-local"
-if not "%~2"=="" set "API_KEY=%~2"
 
-:: ── [1/3] Write config.json ────────────────────────────────────────────────
+:: ── [1/3] Write config.json (first-time only) ─────────────────────────────
 ::
 :: Config format (new - supports multiple named source roots):
 ::   {
-::     "api_key": "<key>",
+::     "api_key": "<randomly generated 40-char hex key>",
+::     "port": 8108,
 ::     "roots": {
 ::       "default": "C:/myproject/src",
 ::       "myother": "C:/other/src"
@@ -54,8 +53,25 @@ if not "%~2"=="" set "API_KEY=%~2"
 echo.
 echo [1/3] Writing codesearch/config.json ...
 set "SRC_FWD=%SRC_DIR:\=/%"
+
+if exist "%REPO%\config.json" (
+    echo   config.json already exists ^(delete it to regenerate^).
+    goto :step2
+)
+
+:: Generate random 20-byte hex API key (unless caller passed an explicit one)
+set "API_KEY=%~2"
+if "%API_KEY%"=="" (
+    for /f "usebackq delims=" %%K in (`powershell -NoProfile -Command "[System.BitConverter]::ToString([System.Security.Cryptography.RandomNumberGenerator]::GetBytes(20)).Replace('-','').ToLower()"`) do set "API_KEY=%%K"
+)
+
+:: Find a free port starting from 8108
+for /f "usebackq delims=" %%P in (`powershell -NoProfile -Command "$p=8108; $used=([System.Net.NetworkInformation.IPGlobalProperties]::GetIPGlobalProperties().GetActiveTcpListeners()|ForEach-Object{$_.Port}); while($p -in $used){$p++}; $p"`) do set "PORT=%%P"
+if "%PORT%"=="" set "PORT=8108"
+
 (echo {) > "%REPO%\config.json"
 (echo   "api_key": "%API_KEY%",) >> "%REPO%\config.json"
+(echo   "port": %PORT%,) >> "%REPO%\config.json"
 (echo   "roots": {) >> "%REPO%\config.json"
 (echo     "default": "%SRC_FWD%") >> "%REPO%\config.json"
 (echo   }) >> "%REPO%\config.json"
@@ -66,6 +82,9 @@ if errorlevel 1 (
 )
 echo   root[default] = %SRC_FWD%
 echo   api_key       = %API_KEY%
+echo   port          = %PORT%
+
+:step2
 
 :: ── [2/3] Create Windows venv ──────────────────────────────────────────────
 echo.
