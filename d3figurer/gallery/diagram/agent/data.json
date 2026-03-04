@@ -1,0 +1,8 @@
+{
+  "tools": [
+    { "label": "Búsqueda Web",        "sub": "Internet · Noticias · Mapas"   },
+    { "label": "Ejecución de Código",  "sub": "Python · Bash · SQL · R"       },
+    { "label": "APIs Externas",        "sub": "REST · GraphQL · Servicios"    },
+    { "label": "Archivos y Datos",     "sub": "Bases de datos · Documentos"   }
+  ]
+}

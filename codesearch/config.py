@@ -1,62 +1,95 @@
 """Shared configuration for Typesense search tooling."""
 
-API_KEY = "codesearch-local"
-PORT = 8108
 HOST = "localhost"
 
+import json
 import os
-import re
-import sys
+import re as _re
 
-UTIL_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-TYPESENSE_DIR = os.path.join(UTIL_DIR, "typesense")
-DATA_DIR = os.path.join(TYPESENSE_DIR, "data")
-BIN_DIR  = os.path.join(TYPESENSE_DIR, "bin")
+# ── config.json ───────────────────────────────────────────────────────────────
+# Stores roots (or legacy src_root) and api_key. Written by setup_mcp.cmd.
+#
+# New multi-root format:
+#   {"api_key": "codesearch-local", "roots": {"default": "C:/myproject/src", "other": "C:/other/src"}}
+#
+# Legacy single-root format (auto-promoted to roots.default):
+#   {"src_root": "Q:/my/repo/src", "api_key": "codesearch-local"}
+_CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
 
-# ── WSL detection and path conversion ────────────────────────────────────────
-# Typesense always stores Windows-style paths (forward slashes, drive letter).
-# When running in WSL these must be converted to /mnt/... for os.path calls.
-
-def _detect_wsl() -> bool:
-    if sys.platform != "linux":
-        return False
+def _read_config() -> dict:
     try:
-        with open("/proc/version") as f:
-            return "microsoft" in f.read().lower()
-    except OSError:
-        return False
+        with open(_CONFIG_FILE) as _f:
+            return json.load(_f)
+    except (OSError, json.JSONDecodeError):
+        return {}
 
-IS_WSL = _detect_wsl()
+_CONFIG = _read_config()
+
+PORT: int = int(_CONFIG.get("port", 8108))
+API_KEY: str = _CONFIG.get("api_key", "codesearch-local")
+
+# ── Roots ─────────────────────────────────────────────────────────────────────
+# Each root maps a name → source directory (Windows forward-slash path).
+# Old-format config has a single "src_root" key; promote it to roots.default.
+_raw_roots: dict = _CONFIG.get("roots") or {"default": _CONFIG.get("src_root", "")}
+
+ROOTS: dict[str, str] = {
+    name: path.replace("\\", "/").rstrip("/")
+    for name, path in _raw_roots.items()
+}
+
+# Backward-compat global: the "default" root's src path
+SRC_ROOT: str = ROOTS.get("default") or next(iter(ROOTS.values()), "")
+
 
 def to_native_path(path: str) -> str:
-    """Convert a Windows-style path (X:/...) to the current platform's path.
+    """Convert a path (Windows or WSL) to the native format for the current process.
 
-    On Windows: returns the path as-is (with forward slashes normalised).
-    On WSL:     X:/foo/bar  →  /mnt/x/foo/bar
+    On Linux/WSL: converts X:/... or X:\\... to /mnt/x/...
+    On Windows:   converts /mnt/x/... to X:/..., leaves X:/... unchanged.
+    Uses forward slashes on both platforms (valid on Windows too).
     """
-    # Normalise backslashes first
+    import sys as _sys
     path = path.replace("\\", "/")
-    if IS_WSL:
-        m = re.match(r"^([A-Za-z]):(.*)", path)
+    if _sys.platform == "linux":
+        m = _re.match(r"^([a-zA-Z]):(.*)", path)
         if m:
-            return f"/mnt/{m.group(1).lower()}{m.group(2)}"
+            path = f"/mnt/{m.group(1).lower()}{m.group(2)}"
+    else:
+        m = _re.match(r"^/mnt/([a-zA-Z])/(.*)", path)
+        if m:
+            path = f"{m.group(1).upper()}:/{m.group(2)}"
     return path
 
-# ── Source root ───────────────────────────────────────────────────────────────
-# Set CODESEARCH_SRC_ROOT to the Windows-style path of the source tree to index
-# (e.g. "Q:\my\repo\src" or "Q:/my/repo/src").  Both slash styles are accepted.
-_env_src = os.environ.get("CODESEARCH_SRC_ROOT", "")
-# Windows-style forward-slash path (what Typesense stores)
-SRC_ROOT_WIN = _env_src.replace("\\", "/").rstrip("/")
-# Platform-native path (for file I/O)
-SRC_ROOT = to_native_path(SRC_ROOT_WIN) if SRC_ROOT_WIN else ""
+
+def _sanitize_root_name(name: str) -> str:
+    """Convert a root name to a valid Typesense collection name segment."""
+    return _re.sub(r"[^a-z0-9_]", "_", name.lower())
+
+
+def collection_for_root(name: str = "default") -> str:
+    """Return the Typesense collection name for a given root name."""
+    return f"codesearch_{_sanitize_root_name(name)}"
+
+
+def get_root(name: str = "") -> tuple[str, str]:
+    """Resolve a root name to (collection_name, src_root).
+
+    Empty string uses the first configured root (preferring "default" if present).
+    Raises ValueError for unknown names.
+    """
+    if not name:
+        name = "default" if "default" in ROOTS else next(iter(ROOTS))
+    if name not in ROOTS:
+        raise ValueError(f"Unknown root {name!r}. Available: {sorted(ROOTS)}")
+    return collection_for_root(name), ROOTS[name]
+
+
+# Backward-compat global: the default root's collection name
+_default_root_name = "default" if "default" in ROOTS else next(iter(ROOTS), "default")
+COLLECTION: str = collection_for_root(_default_root_name)
 
 TYPESENSE_VERSION = "27.1"
-TYPESENSE_ZIP_URL = (
-    f"https://dl.typesense.org/releases/{TYPESENSE_VERSION}/"
-    f"typesense-server-{TYPESENSE_VERSION}-win-amd64.zip"
-)
-TYPESENSE_EXE = os.path.join(BIN_DIR, "typesense-server.exe")
 
 INCLUDE_EXTENSIONS = {
     # C# (full symbol extraction via tree-sitter)
@@ -84,8 +117,6 @@ EXCLUDE_DIRS = {
 
 MAX_FILE_BYTES = 512 * 1024   # skip files larger than 512 KB
 MAX_CONTENT_CHARS = 30000     # truncate content stored in Typesense
-
-COLLECTION = "codesearch_files"
 
 TYPESENSE_CLIENT_CONFIG = {
     "nodes": [{"host": HOST, "port": str(PORT), "protocol": "http"}],

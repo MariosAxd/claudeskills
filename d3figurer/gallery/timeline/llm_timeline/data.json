@@ -1,0 +1,13 @@
+{
+  "events": [
+    { "x": 110, "year": "2017", "title": "Transformer",       "sub": "Mecanismo de Atención",    "dir": "above", "key": false },
+    { "x": 200, "year": "2018", "title": "BERT + GPT-1",      "sub": "Modelos preentrenados",    "dir": "below", "key": false },
+    { "x": 305, "year": "2019", "title": "GPT-2",             "sub": "1.5B parámetros",          "dir": "above", "key": false },
+    { "x": 415, "year": "2020", "title": "GPT-3",             "sub": "175B parámetros",          "dir": "below", "key": false },
+    { "x": 520, "year": "2021", "title": "GitHub Copilot",    "sub": "IA para programadores",    "dir": "above", "key": false },
+    { "x": 615, "year": "2022", "title": "ChatGPT",           "sub": "100M usuarios en 2 meses", "dir": "below", "key": true  },
+    { "x": 730, "year": "2023", "title": "GPT-4 + LLaMA",    "sub": "Multimodales y abiertos",  "dir": "above", "key": false },
+    { "x": 845, "year": "2023", "title": "Gemini + Claude",   "sub": "Competencia global",       "dir": "below", "key": false },
+    { "x": 920, "year": "2024", "title": "o1 Reasoning",      "sub": "Modelos razonadores",      "dir": "above", "key": false }
+  ]
+}

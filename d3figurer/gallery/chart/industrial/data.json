@@ -1,0 +1,32 @@
+{
+  "revs": [
+    {
+      "n": 1, "era": "1760 – 1840",
+      "title": "Revolución Industrial",
+      "driver": "Máquina de vapor",
+      "tech": ["Textil", "Carbón", "Ferrocarril"],
+      "fill": "#e0e0e0", "textFill": "#555555", "numFill": "#555555"
+    },
+    {
+      "n": 2, "era": "1870 – 1914",
+      "title": "Revolución Tecnológica",
+      "driver": "Electricidad y acero",
+      "tech": ["Producción en masa", "Industria química", "Teléfono"],
+      "fill": "#c0c0c0", "textFill": "#555555", "numFill": "#555555"
+    },
+    {
+      "n": 3, "era": "1960 – 1990",
+      "title": "Revolución Digital",
+      "driver": "Ordenadores e Internet",
+      "tech": ["Automatización", "Telecomunicaciones", "Software"],
+      "fill": "#888888", "textFill": "#ffffff", "numFill": "#ffffff"
+    },
+    {
+      "n": 4, "era": "2010 – presente",
+      "title": "Revolución IA",
+      "driver": "Inteligencia Artificial",
+      "tech": ["Machine Learning", "IoT · Robótica", "Biotecnología"],
+      "fill": "#e4003b", "textFill": "#ffffff", "numFill": "#ffffff"
+    }
+  ]
+}

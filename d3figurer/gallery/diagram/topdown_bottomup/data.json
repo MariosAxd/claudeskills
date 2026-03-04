@@ -1,0 +1,20 @@
+{
+  "topEx": ["Eliza", "Shredder", "Deep Blue", "Game-AI"],
+  "botEx": ["Siri", "Alexa", "Watson", "AlphaGo", "Face ID", "ChatGPT"],
+  "topDownCapabilities": [
+    "Lógica formal",
+    "Razonamiento automático",
+    "Ontologías",
+    "Abstracción",
+    "Teoría del aprendizaje",
+    "Teoría de juegos"
+  ],
+  "bottomUpCapabilities": [
+    "Aprendizaje automático (ML)",
+    "Reconocimiento de patrones",
+    "Estadística",
+    "Sistemas de recomendación",
+    "Informática afectiva",
+    "Ciencias de Datos"
+  ]
+}

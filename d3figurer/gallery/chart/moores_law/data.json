@@ -1,0 +1,29 @@
+{
+  "rawData": [
+    { "year": 2000, "transistors":    42000000, "cat": "CPU", "chip": "Pentium III"                    },
+    { "year": 2003, "transistors":   125000000, "cat": "CPU", "chip": "Pentium 4"                      },
+    { "year": 2006, "transistors":   291000000, "cat": "CPU", "chip": "Core 2 Duo"                     },
+    { "year": 2008, "transistors":   731000000, "cat": "CPU", "chip": "Core i7 (Nehalem)"              },
+    { "year": 2010, "transistors":  1160000000, "cat": "CPU", "chip": "Core i7 (Sandy Bridge)"         },
+    { "year": 2012, "transistors":  1400000000, "cat": "CPU", "chip": "Core i7 (Ivy Bridge)"           },
+    { "year": 2014, "transistors":  1900000000, "cat": "CPU", "chip": "Core i7 (Haswell)"              },
+    { "year": 2016, "transistors":  3000000000, "cat": "CPU", "chip": "Core i7 (Kaby Lake)"            },
+    { "year": 2018, "transistors":  3020000000, "cat": "CPU", "chip": "Intel Core i9-9900K"            },
+    { "year": 2019, "transistors":  9600000000, "cat": "CPU", "chip": "AMD Ryzen 9 3900X (Zen 2)"      },
+    { "year": 2021, "transistors": 10400000000, "cat": "CPU", "chip": "AMD Ryzen 9 5950X (Zen 3)"      },
+    { "year": 2022, "transistors": 13000000000, "cat": "CPU", "chip": "Intel Core i9-13900K"           },
+    { "year": 2023, "transistors": 16300000000, "cat": "CPU", "chip": "AMD Ryzen 9 7950X (Zen 4)"      },
+    { "year": 2024, "transistors": 20900000000, "cat": "CPU", "chip": "AMD Ryzen 9 9950X (Zen 5)"      },
+    { "year": 1999, "transistors":    23000000, "cat": "AI",  "chip": "GeForce 256"                    },
+    { "year": 2001, "transistors":    57000000, "cat": "AI",  "chip": "GeForce 3"                      },
+    { "year": 2006, "transistors":   278000000, "cat": "AI",  "chip": "GeForce 8800 GTX"               },
+    { "year": 2008, "transistors":  1400000000, "cat": "AI",  "chip": "GeForce GTX 280"                },
+    { "year": 2010, "transistors":  3000000000, "cat": "AI",  "chip": "GeForce GTX 480"                },
+    { "year": 2012, "transistors":  7100000000, "cat": "AI",  "chip": "GTX Titan"                      },
+    { "year": 2016, "transistors": 15300000000, "cat": "AI",  "chip": "GTX Titan X"                    },
+    { "year": 2018, "transistors": 18600000000, "cat": "AI",  "chip": "RTX 2080 Ti"                    },
+    { "year": 2020, "transistors": 54200000000, "cat": "AI",  "chip": "NVIDIA A100"                    },
+    { "year": 2022, "transistors": 80000000000, "cat": "AI",  "chip": "NVIDIA H100"                    },
+    { "year": 2024, "transistors":208000000000, "cat": "AI",  "chip": "NVIDIA B200"                    }
+  ]
+}

@@ -1,0 +1,48 @@
+{
+  "name": "d3figurer",
+  "version": "1.0.0",
+  "description": "Server-side D3.js figure generation with Chrome/Puppeteer",
+  "main": "src/index.js",
+  "bin": {
+    "d3figurer":           "bin/d3figurer.js",
+    "d3figurer-server":    "bin/d3figurer-server.js",
+    "d3figurer-check":     "bin/d3figurer-check.js",
+    "d3figurer-setup-mcp": "setup_mcp.sh"
+  },
+  "scripts": {
+    "test": "node --test --test-reporter=spec tests/test-checker.js tests/test-client.js tests/test-server-internals.js tests/test-mcp-server.js"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "gallery/",
+    "tests/",
+    "mcp_server.js",
+    "mcp.sh",
+    "server.sh",
+    "setup_mcp.sh",
+    "setup_mcp.cmd",
+    "test.sh"
+  ],
+  "keywords": [
+    "d3",
+    "svg",
+    "pdf", 
+    "puppeteer",
+    "figures",
+    "server-side",
+    "rendering"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@fontsource/montserrat": "^5.2.8",
+    "country-flag-icons": "^1.6.13",
+    "d3": "^7.9.0",
+    "jsdom": "^25.0.1",
+    "puppeteer": "^24.37.4"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

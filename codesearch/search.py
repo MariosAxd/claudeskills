@@ -28,26 +28,34 @@ Examples:
     search.py "Obsolete" --attr                   # find by attribute
 """
 
+
 import os
 import sys
 import json
 import argparse
+import urllib.request
+import urllib.parse
 
 _util_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _util_dir)
 
-import typesense
-from codesearch.config import TYPESENSE_CLIENT_CONFIG, COLLECTION
+from codesearch.config import HOST, PORT, API_KEY, COLLECTION
 
 
-def get_client():
-    return typesense.Client(TYPESENSE_CLIENT_CONFIG)
+def _ts_search(collection: str, params: dict) -> dict:
+    """Send a search request to Typesense over HTTP (no typesense package needed)."""
+    qs = urllib.parse.urlencode({k: str(v) for k, v in params.items()})
+    url = f"http://{HOST}:{PORT}/collections/{collection}/documents/search?{qs}"
+    req = urllib.request.Request(url, headers={"X-TYPESENSE-API-KEY": API_KEY})
+    with urllib.request.urlopen(req, timeout=10) as r:
+        return json.loads(r.read())
 
 
 def search(query, ext=None, sub=None, limit=10,
            symbols_only=False, implements=False, callers=False,
-           sig=False, uses=False, attr=False):
-    client = get_client()
+           sig=False, uses=False, attr=False, collection=None):
+    from codesearch.config import COLLECTION as _DEFAULT_COLLECTION
+    coll_name = collection or _DEFAULT_COLLECTION
 
     # Determine query_by based on mode
     if implements:
@@ -90,14 +98,13 @@ def search(query, ext=None, sub=None, limit=10,
         params["sort_by"] = "_text_match:desc,priority:desc"
 
     try:
-        result = client.collections[COLLECTION].documents.search(params)
+        result = _ts_search(coll_name, params)
     except Exception as e:
         msg = str(e)
         if "400" in msg or "non-indexed" in msg or "index" in msg.lower():
-            print(f"ERROR: Schema issue - re-index with: python codesearch/indexer.py --reset")
+            print(f"ERROR: Schema issue - re-index with: ts index --reset")
         else:
-            print(f"ERROR: Cannot reach Typesense — is the server running?")
-            print(f"  Windows: ts.cmd start   |   WSL: ts_start.cmd")
+            print(f"ERROR: Cannot reach Typesense — is the server running? Run: ts start")
         print(f"  Detail: {e}")
         sys.exit(1)
 

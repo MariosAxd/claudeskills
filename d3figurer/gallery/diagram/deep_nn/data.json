@@ -1,0 +1,10 @@
+{
+  "layers": [
+    { "cx":  90, "n": 8, "color": "#cccccc", "label": "Entrada", "sub": "Píxeles brutos"      },
+    { "cx": 250, "n": 7, "color": "#aaaaaa", "label": "Capa 1",  "sub": "Bordes y curvas"     },
+    { "cx": 410, "n": 6, "color": "#888888", "label": "Capa 2",  "sub": "Formas y texturas"   },
+    { "cx": 570, "n": 5, "color": "#666666", "label": "Capa 3",  "sub": "Partes (ojo, nariz)" },
+    { "cx": 730, "n": 4, "color": "#b80030", "label": "Capa 4",  "sub": "Estructura facial"   },
+    { "cx": 890, "n": 1, "color": "#e4003b", "label": "Salida",  "sub": "¿Quién es?"          }
+  ]
+}

@@ -4,8 +4,16 @@ MCP server for code search.
 Exposes Typesense full-text search and tree-sitter C# structural queries
 as native Claude tools — no copy-paste, results go straight into context.
 
-Runs via WSL Python 3.10 (mcp requires >=3.10).
+Runs via Windows Python (claudeskills/.venv).
 Registered with:  setup_mcp.cmd  (run once from repo root)
+
+Restart / reload instructions:
+  - To restart Typesense + file watcher (does NOT affect this MCP process):
+        ts.cmd restart
+
+  - To pick up changes to THIS file (mcp_server.py), you must reload the
+    VS Code window so the Claude Code extension restarts the MCP subprocess:
+        Ctrl+Shift+P  →  "Developer: Reload Window"
 
 Tools:
     search_code    - Typesense full-text / semantic search across the index
@@ -15,11 +23,13 @@ Tools:
 
 from __future__ import annotations
 
+
 import io
 import json
 import os
 import sys
 import urllib.request
+from pathlib import Path
 
 # ── Path setup ────────────────────────────────────────────────────────────────
 # Add the repo root to sys.path so we can import codesearch.* modules.
@@ -32,15 +42,37 @@ from mcp.server.fastmcp import FastMCP
 
 # ── File resolution ───────────────────────────────────────────────────────────
 # Re-use the shared files_from_search from query.py.
-# config.py detects WSL and sets to_native_path() accordingly, so
-# files_from_search already returns platform-correct paths on both Windows and WSL.
+# Returns Windows native paths (SRC_ROOT + relative_path) for file I/O.
 
 from codesearch.query import files_from_search as _files_from_search
 
-def _wsl_files_from_search(query: str, sub: str | None = None,
-                            ext: str = "cs", limit: int = 50) -> list[str]:
-    """Delegate to the shared files_from_search (handles WSL path conversion)."""
-    return _files_from_search(query=query, sub=sub, ext=ext, limit=limit)
+def _do_files_from_search(query: str, sub: str | None = None,
+                            ext: str = "cs", limit: int = 50,
+                            collection: str | None = None,
+                            src_root: str | None = None) -> list[str]:
+    """Delegate to the shared files_from_search."""
+    return _files_from_search(query=query, sub=sub, ext=ext, limit=limit,
+                               collection=collection, src_root=src_root)
+
+
+import re as _re_module
+
+def _normalize_files_glob(path: str, src_root: str | None = None) -> str:
+    """Normalize a files= glob to a path usable by the current process.
+
+    Accepts any of:
+      - Win fwd-slash: c:/myproject/src/**/*.cs
+      - Win backslash: c:\\myproject\\src\\**\\*.cs
+      - WSL paths:     /mnt/c/myproject/src/**/*.cs
+      - $SRC_ROOT:     $SRC_ROOT/myapp/**/*.cs  (substituted with src_root or SRC_ROOT)
+
+    Delegates platform conversion to config.to_native_path().
+    """
+    from codesearch.config import SRC_ROOT as _DEFAULT_SRC_ROOT, to_native_path
+    effective_root = src_root or _DEFAULT_SRC_ROOT
+    # Substitute $SRC_ROOT / ${SRC_ROOT} before any path normalisation
+    path = path.replace("${SRC_ROOT}", effective_root).replace("$SRC_ROOT", effective_root)
+    return to_native_path(path)
 
 
 def _glob_to_regex(pattern: str) -> "re.Pattern[str]":
@@ -83,7 +115,7 @@ def _ts_search_then_filter(glob_pattern: str, ts_query: str,
 
 # ── MCP server ────────────────────────────────────────────────────────────────
 
-mcp = FastMCP("codesearch")
+mcp = FastMCP("tscodesearch")
 
 
 @mcp.tool()
@@ -93,6 +125,7 @@ def search_code(
     ext:   str = "",
     limit: int = 20,
     mode:  str = "text",
+    root:  str = "",
 ) -> str:
     """
     Search the code index (C#, C++, Python, etc.)
@@ -111,8 +144,16 @@ def search_code(
                "uses"       — files where query type appears in type declarations (T2)
                "sig"        — files where query appears in method signatures (T1)
                "attr"       — files decorated with query attribute name (T2)
+        root:  Named source root to search (empty = default root).
+               Configure roots in config.json under the "roots" key.
     """
     from codesearch.search import search, format_results
+    from codesearch.config import get_root, ROOTS
+
+    try:
+        collection, _src_root = get_root(root)
+    except ValueError as e:
+        return f"Error: {e}\nConfigured roots: {', '.join(sorted(ROOTS))}"
 
     try:
         result, query_by = search(
@@ -126,6 +167,7 @@ def search_code(
             sig          = (mode == "sig"),
             uses         = (mode == "uses"),
             attr         = (mode == "attr"),
+            collection   = collection,
         )
     except SystemExit:
         return ("Typesense search failed. Is the server running?\n"
@@ -151,6 +193,7 @@ def query_cs(
     files:        str = "",
     context_lines: int = 0,
     count_only:   bool = False,
+    root:         str = "",
 ) -> str:
     """
     Structural C# AST query using tree-sitter.
@@ -181,11 +224,16 @@ def query_cs(
                        Example: use "Blobber" to find files mentioning Blobber.
         search_sub:    Subsystem to scope the Typesense pre-filter search.
                        Example: "myapp", "services", "core".
-        files:         WSL glob pattern for direct file query, e.g.
-                       "$SRC_ROOT/myapp/services/**/*.cs"
-                       Use this when you know exactly which directory to search.
+        files:         Glob pattern for direct file query. Accepts Windows
+                       forward-slash, Windows backslash, or WSL /mnt/ paths —
+                       all are normalised automatically. $SRC_ROOT is substituted.
+                       Examples: "$SRC_ROOT/myapp/services/**/*.cs"
+                                 "c:/myproject/src/mymodule/**/*.cs"
+                                 "c:\\myproject\\src\\mymodule\\**\\*.cs"
+                       Use this for comprehensive searches (scans every file).
         context_lines: Surrounding source lines to show per match (like grep -C N).
         count_only:    Return match counts per file instead of full match text.
+        root:          Named source root to query (empty = default root).
 
     Examples:
         query_cs("uses", "StorageProvider", search_query="StorageProvider", search_sub="myapp")
@@ -200,6 +248,12 @@ def query_cs(
     """
     import glob as _glob
     from codesearch.query import process_file
+    from codesearch.config import get_root, ROOTS
+
+    try:
+        _collection, _src_root = get_root(root)
+    except ValueError as e:
+        return f"Error: {e}\nConfigured roots: {', '.join(sorted(ROOTS))}"
 
     VALID_MODES = ("uses", "calls", "implements", "methods", "fields",
                    "classes", "find", "params", "attrs", "usings",
@@ -219,29 +273,31 @@ def query_cs(
     _prefilter_note = ""
 
     if search_query:
-        file_list = _wsl_files_from_search(
-            search_query, sub=search_sub or None, limit=50
+        file_list = _do_files_from_search(
+            search_query, sub=search_sub or None, limit=50,
+            collection=_collection, src_root=_src_root,
         )
     elif files:
-        if pattern:
-            # Fast path: search Typesense, then filter results by glob pattern
-            # in-memory — no filesystem traversal needed.
-            file_list, ts_hits = _ts_search_then_filter(files, pattern)
-            _prefilter_note = (
-                f"[Typesense '{pattern}' → {ts_hits} hits, "
-                f"{len(file_list)} matched glob]\n"
+        files = _normalize_files_glob(files, src_root=_src_root)
+        _FILE_LIMIT = 250
+        file_list = []
+        for _f in _glob.iglob(files, recursive=True):
+            if os.path.isfile(_f):
+                file_list.append(_f)
+                if len(file_list) > _FILE_LIMIT:
+                    break
+        if not file_list:
+            return f"No files found matching glob: {files}"
+        if len(file_list) > _FILE_LIMIT:
+            sq = pattern or "your search term"
+            return (
+                f"Glob matched >{_FILE_LIMIT} files — too broad for tree-sitter scanning.\n"
+                f"Use search_query to pre-filter via Typesense instead:\n"
+                f"  query_cs('{m}', '{pattern}', search_query='{sq}', search_sub='mymodule')\n"
+                f"Or use search_code('{sq}') to locate relevant files first."
             )
-        else:
-            # Modes with no pattern (classes, methods, fields, usings, attrs)
-            # must actually glob — warn if the scope is large.
-            expanded  = sorted(_glob.glob(files, recursive=True))
-            file_list = [f for f in expanded if os.path.isfile(f)]
-            if len(file_list) > 300:
-                return (
-                    f"Glob matched {len(file_list)} files. Provide a tighter "
-                    f"files glob (e.g. a specific subdirectory) for modes "
-                    f"that don't take a pattern."
-                )
+        file_list.sort()
+        _prefilter_note = f"[glob: {len(file_list)} files]\n"
     else:
         return ("Provide either search_query (recommended for large subsystems) "
                 "or a files glob pattern.")
@@ -262,6 +318,7 @@ def query_cs(
                 show_path  = True,
                 count_only = False,
                 context    = context_lines,
+                src_root   = _src_root,
             )
             if n:
                 match_counts[fpath] = n
@@ -290,13 +347,16 @@ def query_cs(
 
 
 @mcp.tool()
-def service_status() -> str:
+def service_status(root: str = "") -> str:
     """
     Check whether the Typesense code search service is running.
     Returns server health, document count, and whether the index is up to date.
     If not running, returns instructions to start it.
+
+    Args:
+        root: Named root to inspect (empty = show all configured roots).
     """
-    from codesearch.config import API_KEY, PORT, HOST, COLLECTION
+    from codesearch.config import API_KEY, PORT, HOST, ROOTS, get_root
 
     url = f"http://{HOST}:{PORT}/health"
     try:
@@ -310,22 +370,48 @@ def service_status() -> str:
     if not health.get("ok"):
         return "Typesense responded but health check returned not-ok."
 
-    req = urllib.request.Request(
-        f"http://{HOST}:{PORT}/collections/{COLLECTION}",
-        headers={"X-TYPESENSE-API-KEY": API_KEY},
-    )
+    # Determine which roots to report
+    if root:
+        try:
+            root_items = [(root, get_root(root)[0])]
+        except ValueError as e:
+            return f"Error: {e}\nConfigured roots: {', '.join(sorted(ROOTS))}"
+    else:
+        root_items = [(name, f"codesearch_{name.lower().replace('-','_')}") for name in ROOTS]
+        # Use collection_for_root for proper sanitization
+        from codesearch.config import collection_for_root
+        root_items = [(name, collection_for_root(name)) for name in ROOTS]
+
+    lines = [f"Typesense running on port {PORT}."]
+    for root_name, coll_name in root_items:
+        req = urllib.request.Request(
+            f"http://{HOST}:{PORT}/collections/{coll_name}",
+            headers={"X-TYPESENSE-API-KEY": API_KEY},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=3) as r:
+                stats = json.loads(r.read())
+            ndocs        = stats.get("num_documents", "?")
+            has_priority = any(f["name"] == "priority" for f in stats.get("fields", []))
+            lines.append(
+                f"Root '{root_name}' ({coll_name}): {ndocs:,} docs"
+                + ("" if has_priority else "  [NO priority field — run: ts index --reset]")
+            )
+        except Exception:
+            lines.append(f"Root '{root_name}' ({coll_name}): collection not found — run: ts index --root {root_name} --reset")
+
+    _watcher_stats_path = Path.home() / ".local" / "typesense" / "watcher_stats.json"
     try:
-        with urllib.request.urlopen(req, timeout=3) as r:
-            stats = json.loads(r.read())
-        ndocs        = stats.get("num_documents", "?")
-        has_priority = any(f["name"] == "priority" for f in stats.get("fields", []))
-        return (f"Typesense running on port {PORT}.\n"
-                f"Index: {ndocs:,} documents.\n"
-                f"Priority field (.cs ranked first): "
-                f"{'yes' if has_priority else 'NO — run: ts index --reset'}")
+        wstats  = json.loads(_watcher_stats_path.read_text(encoding="utf-8"))
+        u       = wstats.get("files_upserted", 0)
+        d       = wstats.get("files_deleted", 0)
+        last    = wstats.get("last_flush") or "never"
+        started = wstats.get("started_at") or "unknown"
+        lines.append(f"Watcher: {u} upserted, {d} deleted since {started} (last: {last})")
     except Exception:
-        return (f"Server running but collection '{COLLECTION}' not found.\n"
-                f"Run: ts index --reset")
+        pass
+
+    return "\n".join(lines)
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

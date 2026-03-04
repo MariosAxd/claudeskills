@@ -1,0 +1,16 @@
+# Dependencies
+# server.sh installs these to ~/.d3figurer-work/d3figurer/ (Linux FS, not here).
+# Ignore in case npm install is accidentally run in this directory.
+node_modules/
+
+# Generated gallery output (built by CI / batch command)
+gallery/output/
+
+# Hang log
+# FigurerClient writes render_hangs.md relative to cwd.
+# When invoked from this directory it lands here.
+render_hangs.md
+
+# Test / coverage output
+coverage/
+*.lcov

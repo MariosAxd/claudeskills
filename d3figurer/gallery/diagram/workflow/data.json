@@ -1,0 +1,39 @@
+{
+  "steps": [
+    {
+      "title": "Texto de entrada",
+      "lines": ["Tu pregunta", "en lenguaje natural"],
+      "fill": "#e8e8e8",
+      "textFill": "#333333",
+      "icon": "\"¿...?\""
+    },
+    {
+      "title": "Tokenización",
+      "lines": ["El texto se divide", "en tokens"],
+      "fill": "#cccccc",
+      "textFill": "#333333",
+      "icon": "[to][ken][s]"
+    },
+    {
+      "title": "Atención",
+      "lines": ["Relaciona palabras", "entre sí"],
+      "fill": "#999999",
+      "textFill": "#ffffff",
+      "icon": "~ ~ ~"
+    },
+    {
+      "title": "Predicción",
+      "lines": ["Genera la respuesta", "palabra a palabra"],
+      "fill": "#b80030",
+      "textFill": "#ffffff",
+      "icon": "w₁ w₂ w₃..."
+    },
+    {
+      "title": "Respuesta final",
+      "lines": ["Respuesta completa", "en pantalla"],
+      "fill": "#e4003b",
+      "textFill": "#ffffff",
+      "icon": "✓"
+    }
+  ]
+}

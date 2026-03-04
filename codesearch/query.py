@@ -43,15 +43,29 @@ Examples:
 """
 
 import os
+import re
 import sys
 import glob as _glob
 import argparse
+import json as _json
+import urllib.request
+import urllib.parse
 
 _util_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _util_dir)
 
 import tree_sitter_c_sharp as tscsharp
 from tree_sitter import Language, Parser
+
+
+def _ts_search(collection: str, params: dict) -> dict:
+    """Send a search request to Typesense over HTTP (no typesense package needed)."""
+    from codesearch.config import HOST, PORT, API_KEY
+    qs = urllib.parse.urlencode({k: str(v) for k, v in params.items()})
+    url = f"http://{HOST}:{PORT}/collections/{collection}/documents/search?{qs}"
+    req = urllib.request.Request(url, headers={"X-TYPESENSE-API-KEY": API_KEY})
+    with urllib.request.urlopen(req, timeout=10) as r:
+        return _json.loads(r.read())
 
 CS = Language(tscsharp.language())
 _parser = Parser(CS)
@@ -81,6 +95,29 @@ def _strip_generic(name: str) -> str:
     """'IFoo<T, U>' → 'IFoo'"""
     idx = name.find("<")
     return name[:idx].strip() if idx >= 0 else name.strip()
+
+
+def _unqualify(name: str) -> str:
+    """Strip namespace prefix: 'A.B.IFoo' → 'IFoo'."""
+    return name.rsplit(".", 1)[-1]
+
+
+_QUALIFIED_RE = re.compile(r'(?:[A-Za-z_]\w*\.)+([A-Za-z_]\w*)')
+
+
+def _unqualify_type(text: str) -> str:
+    """Strip namespace prefixes from all qualified names in a type string."""
+    return _QUALIFIED_RE.sub(r'\1', text)
+
+
+def _type_names(type_txt: str) -> set:
+    """All unqualified type names that appear in a (possibly generic) type string.
+
+    'IList<Acme.IFoo>'  → {'IList', 'IFoo'}
+    'Dictionary<string, IFoo>'        → {'Dictionary', 'string', 'IFoo'}
+    'IBlobStore'                      → {'IBlobStore'}
+    """
+    return set(re.findall(r'[A-Za-z_]\w*', _unqualify_type(type_txt)))
 
 
 _TYPE_DECL_NODES = {
@@ -280,7 +317,7 @@ def q_implements(src, tree, lines, type_name):
     results = []
     for node in _find_all(tree.root_node, lambda n: n.type in _TYPE_DECL_NODES):
         bases = _base_type_names(node, src)
-        if not any(_strip_generic(b) == type_name for b in bases):
+        if not any(_strip_generic(_unqualify(b)) == type_name for b in bases):
             continue
         name_node = node.child_by_field_name("name")
         if not name_node:
@@ -351,8 +388,9 @@ def q_attrs(src, tree, lines, attr_name=None):
             continue
         aname       = _text(name_node, src).strip()
         aname_short = aname[:-len("Attribute")] if aname.endswith("Attribute") else aname
+        aname_unqual = _unqualify(aname_short)
         if attr_name:
-            if aname_short != attr_name and aname != attr_name:
+            if aname_unqual != attr_name and aname_short != attr_name and aname != attr_name:
                 continue
         args_node = node.child_by_field_name("arguments")
         args_txt  = _text(args_node, src).strip() if args_node else ""
@@ -434,7 +472,7 @@ def q_field_type(src, tree, lines, type_name):
                                                "property_declaration")):
         if node.type == "field_declaration":
             type_txt = _field_type(node, src)
-            if _strip_generic(type_txt) != type_name:
+            if type_name not in _type_names(type_txt):
                 continue
             for var in _find_all(node, lambda n: n.type == "variable_declarator"):
                 vn = var.child_by_field_name("name")
@@ -449,7 +487,7 @@ def q_field_type(src, tree, lines, type_name):
             if not type_node:
                 continue
             type_txt = _text(type_node, src).strip()
-            if _strip_generic(type_txt) != type_name:
+            if type_name not in _type_names(type_txt):
                 continue
             name_node = node.child_by_field_name("name")
             if name_node:
@@ -490,7 +528,7 @@ def q_param_type(src, tree, lines, type_name):
             if not pt:
                 continue
             pt_txt = _text(pt, src).strip()
-            if _strip_generic(pt_txt) != type_name:
+            if type_name not in _type_names(pt_txt):
                 continue
             pn = p.child_by_field_name("name")
             pn_txt = _text(pn, src).strip() if pn else ""
@@ -519,7 +557,7 @@ def q_casts(src, tree, lines, type_name):
         type_node = node.child_by_field_name("type")
         if not type_node:
             continue
-        cast_type = _strip_generic(_text(type_node, src).strip())
+        cast_type = _strip_generic(_unqualify(_text(type_node, src).strip()))
         if cast_type != type_name:
             continue
         row = node.start_point[0]
@@ -574,19 +612,22 @@ def _enclosing_type_name(node, src) -> str:
 
 # ── Typesense file resolver ───────────────────────────────────────────────────
 
-def files_from_search(query, sub=None, ext="cs", limit=50):
+def files_from_search(query, sub=None, ext="cs", limit=50,
+                       collection=None, src_root=None):
     """
     Run a Typesense search and return the local file paths of matching documents.
     Faster than globbing when you already know roughly which files are relevant.
-    """
-    try:
-        import typesense
-        from codesearch.config import TYPESENSE_CLIENT_CONFIG, COLLECTION, SRC_ROOT, SRC_ROOT_WIN, to_native_path
-    except ImportError as e:
-        print(f"Cannot import Typesense client: {e}", file=sys.stderr)
-        return []
 
-    client = typesense.Client(TYPESENSE_CLIENT_CONFIG)
+    collection: Typesense collection name (defaults to COLLECTION from config).
+    src_root:   Source root directory for constructing absolute paths
+                (defaults to SRC_ROOT from config).
+    """
+    from codesearch.config import COLLECTION, SRC_ROOT
+
+    from codesearch.config import to_native_path
+    coll_name = collection or COLLECTION
+    root = src_root or SRC_ROOT
+    src_root_native = to_native_path(root)
 
     filter_parts = [f"extension:={ext.lstrip('.')}"] if ext else []
     if sub:
@@ -603,7 +644,7 @@ def files_from_search(query, sub=None, ext="cs", limit=50):
         params["filter_by"] = " && ".join(filter_parts)
 
     try:
-        result = client.collections[COLLECTION].documents.search(params)
+        result = _ts_search(coll_name, params)
     except Exception as e:
         print(f"Typesense search error: {e}", file=sys.stderr)
         print("Is the server running? Try: ts start", file=sys.stderr)
@@ -612,13 +653,12 @@ def files_from_search(query, sub=None, ext="cs", limit=50):
     paths = []
     seen  = set()
     for hit in result.get("hits", []):
-        doc  = hit["document"]
-        raw  = doc.get("path", "")
-        if not raw:
-            rel = doc.get("relative_path", "")
-            raw = f"{SRC_ROOT_WIN}/{rel}"
-        # Convert Windows-style path to platform-native (handles WSL transparently)
-        path = to_native_path(raw)
+        doc = hit["document"]
+        rel = doc.get("relative_path", "")
+        if not rel:
+            continue
+        # Construct native OS path from src_root + relative_path
+        path = os.path.join(src_root_native, rel.replace("/", os.sep))
         if path not in seen and os.path.isfile(path):
             seen.add(path)
             paths.append(path)
@@ -631,7 +671,7 @@ def files_from_search(query, sub=None, ext="cs", limit=50):
 
 # ── File processing ───────────────────────────────────────────────────────────
 
-def process_file(path, mode, mode_arg, show_path, count_only, context=0):
+def process_file(path, mode, mode_arg, show_path, count_only, context=0, src_root=None):
     try:
         src_bytes = open(path, "rb").read()
     except OSError as e:
@@ -671,12 +711,20 @@ def process_file(path, mode, mode_arg, show_path, count_only, context=0):
     if not results:
         return 0
 
+    # Strip src_root prefix so paths are shown relative to the search root
+    from codesearch.config import SRC_ROOT as _SRC_ROOT
+    _effective_root = (src_root or _SRC_ROOT).rstrip("/").replace("\\", "/")
+    _path_norm = path.replace("\\", "/")
+    if _effective_root and _path_norm.lower().startswith(_effective_root.lower() + "/"):
+        _disp_base = _path_norm[len(_effective_root) + 1:]
+    else:
+        _disp_base = _path_norm
+
     if count_only:
-        disp = path.replace("\\", "/")
-        print(f"{len(results):4d}  {disp}")
+        print(f"{len(results):4d}  {_disp_base}")
         return len(results)
 
-    disp_path = path.replace("\\", "/")
+    disp_path = _disp_base
     for line_num_str, text in results:
         if show_path:
             print(f"{disp_path}:{line_num_str}: {text}")

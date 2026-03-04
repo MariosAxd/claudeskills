@@ -1,0 +1,61 @@
+{
+  "strategies": [
+    { "year": 2017, "country": "Canadá",     "code": "CA", "desc": "Investigación y talento"     },
+    { "year": 2017, "country": "Japón",      "code": "JP", "desc": "Sociedad 5.0"               },
+    { "year": 2017, "country": "Singapur",   "code": "SG", "desc": "Nación inteligente"         },
+    { "year": 2017, "country": "China",      "code": "CN", "desc": "Liderazgo 2030"             },
+    { "year": 2017, "country": "EAU",        "code": "AE", "desc": "Gobierno digital"           },
+    { "year": 2017, "country": "Finlandia",  "code": "FI", "desc": "Adopción temprana"          },
+
+    { "year": 2018, "country": "Francia",    "code": "FR", "desc": "IA humanista"               },
+    { "year": 2018, "country": "R. Unido",   "code": "GB", "desc": "Industria y sector IA"      },
+    { "year": 2018, "country": "Alemania",   "code": "DE", "desc": "Industria 4.0"              },
+    { "year": 2018, "country": "Corea S.",   "code": "KR", "desc": "IA vida cotidiana"          },
+    { "year": 2018, "country": "EE. UU.",    "code": "US", "desc": "Liderazgo global"           },
+    { "year": 2018, "country": "Suecia",     "code": "SE", "desc": "Innovación ética"           },
+    { "year": 2018, "country": "India",      "code": "IN", "desc": "IA bien social"             },
+    { "year": 2018, "country": "Italia",     "code": "IT", "desc": "Transformación digital"     },
+    { "year": 2018, "country": "Dinamarca",  "code": "DK", "desc": "Datos abiertos"             },
+    { "year": 2018, "country": "Australia",  "code": "AU", "desc": "Marco ético"               },
+    { "year": 2018, "country": "México",     "code": "MX", "desc": "Gobierno digital"           },
+    { "year": 2018, "country": "Malta",      "code": "MT", "desc": "Hub innovación"             },
+    { "year": 2018, "country": "Túnez",      "code": "TN", "desc": "Economía digital"           },
+    { "year": 2018, "country": "Taiwán",     "code": "TW", "desc": "Semiconductores e IA"       },
+    { "year": 2018, "country": "Kenia",      "code": "KE", "desc": "Economía digital"           },
+
+    { "year": 2019, "country": "Polonia",    "code": "PL", "desc": "Plan sectorial"             },
+    { "year": 2019, "country": "Rusia",      "code": "RU", "desc": "Soberanía tecnológica"      },
+    { "year": 2019, "country": "Holanda",    "code": "NL", "desc": "Innovación y prosperidad"   },
+    { "year": 2019, "country": "Lituania",   "code": "LT", "desc": "Gobierno inteligente"       },
+    { "year": 2019, "country": "Rep. Checa", "code": "CZ", "desc": "IA confiable"              },
+    { "year": 2019, "country": "OCDE",       "code": "OC", "desc": "Principios IA global"       },
+
+    { "year": 2020, "country": "España",     "code": "ES", "desc": "España Digital 2025"        },
+    { "year": 2020, "country": "Noruega",    "code": "NO", "desc": "IA responsable"             },
+
+    { "year": 2021, "country": "Austria",    "code": "AT", "desc": "Misión IA 2030"            },
+    { "year": 2021, "country": "Turquía",    "code": "TR", "desc": "Industria 4.0"              },
+    { "year": 2021, "country": "Egipto",     "code": "EG", "desc": "Desarrollo sostenible"      },
+    { "year": 2021, "country": "Chile",      "code": "CL", "desc": "Política de datos"          },
+    { "year": 2021, "country": "UNESCO",     "code": "UC", "desc": "Ética IA global"            },
+
+    { "year": 2022, "country": "Portugal",   "code": "PT", "desc": "IA 2030"                   },
+    { "year": 2022, "country": "Bélgica",    "code": "BE", "desc": "IA confiable"              },
+    { "year": 2022, "country": "Grecia",     "code": "GR", "desc": "Transformación digital"     },
+
+    { "year": 2023, "country": "Brasil",     "code": "BR", "desc": "Estrategia nacional"        },
+    { "year": 2023, "country": "Irlanda",    "code": "IE", "desc": "Investigación e innovación" },
+
+    { "year": 2024, "country": "Nigeria",    "code": "NG", "desc": "Transformación digital"     },
+    { "year": 2024, "country": "Sudáfrica",  "code": "ZA", "desc": "IA responsable"             },
+    { "year": 2024, "country": "Arabia S.",  "code": "SA", "desc": "SDAIA liderazgo IA"         },
+    { "year": 2024, "country": "UE",         "code": "EU", "desc": "Reglamento IA por riesgo"   },
+    { "year": 2024, "country": "ONU",        "code": "UN", "desc": "Pacto Digital global"       },
+    { "year": 2024, "country": "Colombia",   "code": "CO", "desc": "Marco política IA"          },
+
+    { "year": 2025, "country": "Israel",     "code": "IL", "desc": "Infraestructura nacional"   },
+    { "year": 2025, "country": "Suiza",      "code": "CH", "desc": "Innovación sin excesos"     },
+    { "year": 2025, "country": "N. Zelanda", "code": "NZ", "desc": "Economía IA adoptante"      },
+    { "year": 2025, "country": "Nigeria",    "code": "NG", "desc": "Marco transformación"       }
+  ]
+}

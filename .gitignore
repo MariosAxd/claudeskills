@@ -16,17 +16,28 @@ venv/
 env/
 .env
 
+# Local configuration (written by setup_mcp.cmd)
+codesearch/config.json
+
 # Logs and runtime files
 *.log
 *.pid
 
-# IDE
-.vscode/
+# IDE — root-level only so vscode-codesearch/.vscode/ is tracked
+/.vscode/
 .claude/
 .idea/
 *.suo
 *.user
 
+# VS Code extension build artifacts
+codesearch/vscode-codesearch/node_modules/
+codesearch/vscode-codesearch/out/
+codesearch/vscode-codesearch/*.vsix
+
 # OS
 .DS_Store
 Thumbs.db
+
+# Generated gallery output (built by CI)
+d3figurer/gallery/output/
