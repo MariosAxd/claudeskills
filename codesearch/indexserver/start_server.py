@@ -102,9 +102,10 @@ def start():
     if wait_for_ready():
         print(f" Ready at http://localhost:{PORT}")
     else:
-        print(f"\nWARNING: did not respond in 40s. Check logs:")
+        print(f"\nERROR: Typesense did not respond within 40s. Check logs:")
         print(f"  cat {LOG_PATH}")
         print(f"  cat {ERROR_LOG_PATH}")
+        sys.exit(1)
 
 
 def stop():

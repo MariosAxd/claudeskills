@@ -514,11 +514,20 @@ def ensure_collection(client, reset=False, collection=None):
     coll_name = collection or COLLECTION
     schema = build_schema(coll_name)
 
+    # Typesense can return 503 "Not Ready" briefly after startup even after
+    # /health reports OK.  Retry a few times before giving up.
     exists = True
-    try:
-        client.collections[coll_name].retrieve()
-    except Exception:
-        exists = False
+    for attempt in range(6):
+        try:
+            client.collections[coll_name].retrieve()
+            break
+        except Exception as e:
+            if "503" in str(e) and attempt < 5:
+                print(f"  Typesense not ready yet (attempt {attempt + 1}/6), retrying in 3s...")
+                time.sleep(3)
+            else:
+                exists = False
+                break
 
     if exists and reset:
         print(f"Dropping existing collection '{coll_name}'...")

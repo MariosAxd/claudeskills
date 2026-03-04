@@ -256,7 +256,7 @@ def cmd_start(args) -> None:
             indexer_alive, _ = _pid_alive(_INDEXER_PID)
             if not indexer_alive:
                 import types as _types
-                cmd_index(_types.SimpleNamespace(resethard=True, root=root_name))
+                cmd_index(_types.SimpleNamespace(resethard=False, root=root_name))
                 break
             else:
                 print("  (indexer already running)")
