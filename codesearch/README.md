@@ -6,7 +6,6 @@ Full-text and structural code search for a large monorepo. Runs a [Typesense](ht
 
 - Windows 11 with WSL2
 - Python 3.10+ available in WSL (`python3 --version`)
-- Git available in both Windows and WSL
 
 ## One-time setup
 
@@ -191,7 +190,7 @@ Typical flow: Typesense narrows the haystack to ~50 candidate files → tree-sit
 | File | Purpose |
 |------|---------|
 | `config.py` | Same constants as client config.py; also has INCLUDE_EXTENSIONS, EXCLUDE_DIRS, MAX_FILE_BYTES |
-| `indexer.py` | Full re-index via `git ls-files` + tree-sitter C# metadata extraction |
+| `indexer.py` | Full re-index via `os.walk` + `.gitignore` parsing + tree-sitter C# metadata extraction |
 | `watcher.py` | Incremental updates: PollingObserver monitors source root and upserts changes |
 | `heartbeat.py` | Health loop: checks server every 30s, restarts watcher or server on failure |
 | `start_server.py` | Downloads Typesense Linux binary; starts server process in WSL |

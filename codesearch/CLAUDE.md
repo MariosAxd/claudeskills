@@ -41,7 +41,7 @@ Two distinct layers that run in separate processes and venvs:
 | File | Responsibility |
 |------|---------------|
 | `config.py` | Same constants as client `config.py` — reads the same `codesearch/config.json`. Also has `INCLUDE_EXTENSIONS`, `EXCLUDE_DIRS`, `MAX_FILE_BYTES`, `MAX_CONTENT_CHARS`. Imported by all indexserver modules. |
-| `indexer.py` | One-shot full index. `run_index(src_root, collection, reset, verbose)` walks repo with `git ls-files`, calls tree-sitter via `extract_cs_metadata()`, batches upserts into Typesense. `build_schema(name)` returns the collection schema. |
+| `indexer.py` | One-shot full index. `run_index(src_root, collection, reset, verbose)` walks the source tree via `os.walk` + `.gitignore` parsing (`pathspec`), calls tree-sitter via `extract_cs_metadata()`, batches upserts into Typesense. `build_schema(name)` returns the collection schema. |
 | `watcher.py` | Incremental updates. `PollingObserver` monitors source root and upserts changed files. Uses `PollingObserver` (not inotify) because source is on a Windows-backed `/mnt/` path. |
 | `heartbeat.py` | Health loop. Checks Typesense liveness every 30 s and restarts watcher or server if needed. |
 | `start_server.py` | Downloads the Typesense Linux binary to `~/.local/typesense/` on first run, starts the process, writes PID to `~/.local/typesense/typesense.pid`. |
@@ -66,7 +66,7 @@ Two distinct layers that run in separate processes and venvs:
 |------|----------|---------|----------|
 | MCP (WSL) | `~/.local/mcp-venv/` | `mcp.sh` → `mcp_server.py` — **used by Claude Code VSCode ext** | `mcp`, `tree_sitter_c_sharp`, `tree_sitter` |
 | MCP (Windows) | `codesearch/.venv/` | `mcp.cmd` → `mcp_server.py` — alternative, not used by extension | same as above |
-| Indexserver | `~/.local/indexserver-venv/` | `ts.cmd/ts.sh` → all indexserver modules | `typesense`, `tree_sitter_c_sharp`, `tree_sitter`, `watchdog`, `pytest` |
+| Indexserver | `~/.local/indexserver-venv/` | `ts.cmd/ts.sh` → all indexserver modules | `typesense`, `tree_sitter_c_sharp`, `tree_sitter`, `watchdog`, `pathspec`, `pytest` |
 
 > **The indexserver and MCP client have separate tree-sitter parsers.** Both parse C# correctly — they just run in different processes. Do not confuse `codesearch.query` (MCP-side) with `codesearch.indexserver.indexer` (indexer-side) when tracing a bug.
 
@@ -170,7 +170,7 @@ Test classes:
 
 Both read the same `codesearch/config.json`. If you update config logic, update both.
 
-**`walk_source_files` requires a git repo.** The indexer uses `git ls-files` to enumerate files. Test directories must be initialized with `git init && git add .`.
+**`walk_source_files` uses `os.walk` + `.gitignore` parsing (via `pathspec`).** No git is required. Each `.gitignore` found during the walk is loaded and applied relative to its own directory. `EXCLUDE_DIRS` from config prunes directories before gitignore patterns are checked.
 
 **`PollingObserver` in watcher.** The watcher polls every 10 s instead of using inotify because the source tree is on `/mnt/q/` (Windows-backed NTFS). Don't switch to `Observer` — inotify doesn't fire for changes made on the Windows side.
 

@@ -32,7 +32,7 @@ from codesearch.indexserver.config import (
 def _to_native_path(path: str) -> str:
     """Convert a Windows-style path (Q:/foo or Q:\\foo) to the platform-native form.
 
-    On WSL (Linux), converts to /mnt/q/foo so that git and open() work correctly.
+    On WSL (Linux), converts to /mnt/q/foo so that open() works correctly.
     On Windows, converts forward slashes to backslashes.
     """
     p = path.replace("\\", "/")
@@ -410,32 +410,60 @@ def ensure_collection(client, reset=False, collection=None):
 # ---------------------------------------------------------------------------
 
 def walk_source_files(src_root: str):
-    """Yield (full_path, relative_path) for all source files visible to git."""
+    """Yield (full_path, relative_path) for all source files, respecting .gitignore."""
+    import pathspec
+
     src_root = _to_native_path(src_root)
-    import subprocess as _sp
-    proc = _sp.Popen(
-        ["git", "-C", src_root, "ls-files",
-         "--cached", "--others", "--exclude-standard"],
-        stdout=_sp.PIPE, stderr=_sp.DEVNULL,
-    )
-    try:
-        for raw in proc.stdout:
-            rel = raw.rstrip(b"\n").decode("utf-8", errors="replace")
-            if not rel:
-                continue
-            ext = os.path.splitext(rel)[1].lower()
+
+    # Cache: abs_dir -> PathSpec | None
+    _spec_cache: dict = {}
+
+    def _load_spec(dirpath: str):
+        if dirpath in _spec_cache:
+            return _spec_cache[dirpath]
+        gi = os.path.join(dirpath, ".gitignore")
+        spec = None
+        if os.path.isfile(gi):
+            try:
+                with open(gi, "r", encoding="utf-8", errors="replace") as f:
+                    spec = pathspec.PathSpec.from_lines("gitwildmatch", f)
+            except OSError:
+                pass
+        _spec_cache[dirpath] = spec
+        return spec
+
+    def _is_ignored(full_path: str) -> bool:
+        """Check all ancestor .gitignore files from src_root down to the item's parent."""
+        rel_parts = os.path.relpath(full_path, src_root).replace("\\", "/").split("/")
+        check_dir = src_root
+        for i, part in enumerate(rel_parts):
+            spec = _load_spec(check_dir)
+            if spec and spec.match_file("/".join(rel_parts[i:])):
+                return True
+            if i < len(rel_parts) - 1:
+                check_dir = os.path.join(check_dir, part)
+        return False
+
+    for dirpath, dirs, files in os.walk(src_root, topdown=True):
+        dirs[:] = [
+            d for d in dirs
+            if not should_skip_dir(d)
+            and not _is_ignored(os.path.join(dirpath, d))
+        ]
+        for filename in files:
+            full_path = os.path.join(dirpath, filename)
+            ext = os.path.splitext(filename)[1].lower()
             if ext not in INCLUDE_EXTENSIONS:
                 continue
-            full_path = os.path.join(src_root, rel.replace("/", os.sep))
             try:
                 if os.path.getsize(full_path) > MAX_FILE_BYTES:
                     continue
             except OSError:
                 continue
+            if _is_ignored(full_path):
+                continue
+            rel = os.path.relpath(full_path, src_root).replace("\\", "/")
             yield full_path, rel
-    finally:
-        proc.stdout.close()
-        proc.wait()
 
 
 def _fmt_time(seconds: float) -> str:
