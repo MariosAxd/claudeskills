@@ -71,60 +71,31 @@ set "SRC_DIR=%~1"
 :: To add more roots after setup: edit config.json, add entries under "roots",
 :: then run: ts.cmd index --root <name> --reset
 ::
-echo.
-echo [1/4] Writing codesearch/config.json ...
 set "SRC_FWD=%SRC_DIR:\=/%"
 
-if exist "%REPO%\config.json" (
-    echo   config.json already exists ^(delete it to regenerate^).
-    goto :step2
-)
-
-:: Generate random 20-byte hex API key (unless caller passed an explicit one)
-set "API_KEY=%~2"
-if "%API_KEY%"=="" (
-    for /f "usebackq delims=" %%K in (`powershell -NoProfile -Command "[System.BitConverter]::ToString([System.Security.Cryptography.RandomNumberGenerator]::GetBytes(20)).Replace('-','').ToLower()"`) do set "API_KEY=%%K"
-)
-
 :: Find a free port starting from 8108
+set "PORT="
 for /f "usebackq delims=" %%P in (`powershell -NoProfile -Command "$p=8108; $used=([System.Net.NetworkInformation.IPGlobalProperties]::GetIPGlobalProperties().GetActiveTcpListeners()|ForEach-Object{$_.Port}); while($p -in $used){$p++}; $p"`) do set "PORT=%%P"
 if "%PORT%"=="" set "PORT=8108"
 
-(echo {) > "%REPO%\config.json"
-(echo   "api_key": "%API_KEY%",) >> "%REPO%\config.json"
-(echo   "port": %PORT%,) >> "%REPO%\config.json"
-(echo   "roots": {) >> "%REPO%\config.json"
-(echo     "default": "%SRC_FWD%") >> "%REPO%\config.json"
-(echo   }) >> "%REPO%\config.json"
-(echo }) >> "%REPO%\config.json"
-if errorlevel 1 (
-    echo ERROR: Failed to write config.json.
-    exit /b 1
-)
-echo   root[default] = %SRC_FWD%
-echo   api_key       = %API_KEY%
-echo   port          = %PORT%
-
-:step2
-
-:: ── [2/4] Create WSL venvs (mcp-venv + indexserver-venv) ──────────────────
+:: ── [1/3] Write config.json + create WSL venvs (setup_mcp.sh handles both) ──
 echo.
-echo [2/4] Creating WSL venvs via setup_mcp.sh ...
+echo [1/3] WSL setup (config.json + venvs) via setup_mcp.sh ...
 for /f "usebackq delims=" %%P in (`wsl.exe wslpath -u "%REPO%"`) do set "WSL_REPO=%%P"
 if "%WSL_REPO%"=="" (
     echo ERROR: Could not convert repo path to WSL path.
     echo        Path attempted: %REPO%
     exit /b 1
 )
-wsl.exe bash "%WSL_REPO%/setup_mcp.sh"
+wsl.exe bash "%WSL_REPO%/setup_mcp.sh" "%SRC_FWD%" "%PORT%" "%~2"
 if errorlevel 1 (
-    echo ERROR: WSL venv setup failed. See messages above.
+    echo ERROR: WSL setup failed. See messages above.
     exit /b 1
 )
 
 :: ── [3/4] Register MCP ────────────────────────────────────────────────────
 echo.
-echo [3/4] Registering MCP server with Claude Code ...
+echo [2/3] Registering MCP server with Claude Code ...
 claude mcp remove --scope user tscodesearch >nul 2>&1
 claude mcp add --scope user tscodesearch -- wsl.exe bash -l "%WSL_REPO%/mcp.sh"
 if errorlevel 1 (
@@ -134,7 +105,7 @@ if errorlevel 1 (
 
 :: ── [4/4] Start indexserver ───────────────────────────────────────────────
 echo.
-echo [4/4] Starting indexserver ^(Typesense + watcher + indexer^) ...
+echo [3/3] Starting indexserver ^(Typesense + watcher + indexer^) ...
 call "%REPO%\ts.cmd" start
 if errorlevel 1 (
     echo ERROR: Failed to start indexserver.

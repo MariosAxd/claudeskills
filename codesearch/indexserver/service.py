@@ -51,10 +51,11 @@ _HEARTBEAT_PY = str(_THIS_DIR / "heartbeat.py")
 _INDEXER_LOG   = str(_RUN_DIR / "indexer.log")
 _HEARTBEAT_LOG = str(_RUN_DIR / "heartbeat.log")
 _SERVER_PID    = str(_RUN_DIR / "typesense.pid")
+_SERVER_LOG    = str(_RUN_DIR / "typesense.log")
+_SERVER_ERR    = str(_RUN_DIR / "typesense-error.log")
 _WATCHER_PID   = str(_RUN_DIR / "watcher.pid")
 _INDEXER_PID   = str(_RUN_DIR / "indexer.pid")
 _HEARTBEAT_PID = str(_RUN_DIR / "heartbeat.pid")
-_SERVER_LOG    = str(_RUN_DIR / "typesense.log")
 _WATCHER_STATS = str(_RUN_DIR / "watcher_stats.json")
 
 
@@ -185,7 +186,30 @@ def cmd_status(args) -> None:
     print("----------------------------------------------------------------------")
 
 
+def _to_native_path(path: str) -> str:
+    """Convert a Windows-format path (X:/...) to the native path for this process."""
+    import re as _re
+    path = path.replace("\\", "/")
+    if sys.platform == "linux":
+        m = _re.match(r"^([a-zA-Z]):(.*)", path)
+        if m:
+            path = f"/mnt/{m.group(1).lower()}{m.group(2)}"
+    return path
+
+
 def cmd_start(args) -> None:
+    if not API_KEY or not API_KEY.strip():
+        print("ERROR: api_key is missing or blank in config.json.")
+        print("       Delete config.json and re-run setup_mcp.cmd to regenerate it.")
+        sys.exit(1)
+
+    for root_name, raw_path in ROOTS.items():
+        native = _to_native_path(raw_path)
+        if not os.path.isdir(native):
+            print(f"ERROR: Source directory for root '{root_name}' does not exist: {native}")
+            print(f"       Check 'roots.{root_name}' in config.json, then run: ts restart")
+            sys.exit(1)
+
     server_alive, _ = _pid_alive(_SERVER_PID)
     if not server_alive and not _typesense_health()["ok"]:
         print("Starting Typesense server...")
@@ -308,26 +332,26 @@ def cmd_index(args) -> None:
     print(f"  Monitor with: ts status   or   ts log --indexer")
 
 
+def _tail_log(path: str, n: int, label: str) -> None:
+    if not os.path.exists(path):
+        print(f"No {label} log found.")
+        return
+    with open(path, encoding="utf-8", errors="replace") as f:
+        lines = f.readlines()
+    for line in lines[-n:]:
+        print(line, end="")
+
+
 def cmd_log(args) -> None:
+    n = args.lines or 40
     if args.heartbeat:
-        if not os.path.exists(_HEARTBEAT_LOG):
-            print("No heartbeat log found.")
-            return
-        with open(_HEARTBEAT_LOG, encoding="utf-8", errors="replace") as f:
-            lines = f.readlines()
-        for line in lines[-(args.lines or 40):]:
-            print(line, end="")
+        _tail_log(_HEARTBEAT_LOG, n, "heartbeat")
     elif args.indexer:
-        if not os.path.exists(_INDEXER_LOG):
-            print("No indexer log found.")
-            return
-        with open(_INDEXER_LOG, encoding="utf-8", errors="replace") as f:
-            lines = f.readlines()
-        for line in lines[-(args.lines or 40):]:
-            print(line, end="")
+        _tail_log(_INDEXER_LOG, n, "indexer")
+    elif args.error:
+        _tail_log(_SERVER_ERR, n, "server error")
     else:
-        n = args.lines or 40
-        subprocess.run(["bash", "-c", f"tail -{n} {_SERVER_LOG}"])
+        _tail_log(_SERVER_LOG, n, "server")
 
 
 def cmd_heartbeat(args) -> None:
@@ -391,6 +415,7 @@ def main():
     p_log = sub.add_parser("log", help="Show server, indexer, or heartbeat log")
     p_log.add_argument("--indexer",   action="store_true", help="Show indexer log")
     p_log.add_argument("--heartbeat", action="store_true", help="Show heartbeat log")
+    p_log.add_argument("--error",     action="store_true", help="Show server error log (stderr)")
     p_log.add_argument("--lines", "-n", type=int, default=40, help="Lines to show (default 40)")
 
     sub.add_parser("watcher",   help="Start the file watcher standalone")

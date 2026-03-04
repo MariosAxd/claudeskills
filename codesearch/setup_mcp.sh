@@ -12,6 +12,11 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 MCP_VENV="$HOME/.local/mcp-venv"
 IDX_VENV="$HOME/.local/indexserver-venv"
 
+# ── Optional args from setup_mcp.cmd: <src-dir-win> [port] [api-key] ─────────
+_SRC_WIN="${1:-}"
+_PORT="${2:-8108}"
+_EXPLICIT_KEY="${3:-}"
+
 # ── Read Typesense version from config.py (single source of truth) ────────────
 TYPESENSE_VERSION=$(sed -n 's/^TYPESENSE_VERSION = "\(.*\)"/\1/p' \
     "$SCRIPT_DIR/indexserver/config.py")
@@ -51,6 +56,26 @@ if ! command -v curl &>/dev/null; then
 fi
 
 echo "  Python $PY  |  Typesense $TYPESENSE_VERSION"
+
+# ── Write config.json (first-time only; only when called with src-dir) ────────
+_CONFIG_FILE="$SCRIPT_DIR/config.json"
+if [ -n "$_SRC_WIN" ]; then
+    echo ""
+    echo "[1/4] Writing codesearch/config.json ..."
+    if [ -f "$_CONFIG_FILE" ]; then
+        echo "  config.json already exists (delete it to regenerate)."
+    else
+        _API_KEY="${_EXPLICIT_KEY:-$(python3 -c 'import secrets; print(secrets.token_hex(20))')}"
+        python3 -c "
+import json, sys
+d = {'api_key': sys.argv[1], 'port': int(sys.argv[2]), 'roots': {'default': sys.argv[3]}}
+print(json.dumps(d, indent=2))
+" "$_API_KEY" "$_PORT" "$_SRC_WIN" > "$_CONFIG_FILE"
+        echo "  root[default] = $_SRC_WIN"
+        echo "  api_key       = $_API_KEY"
+        echo "  port          = $_PORT"
+    fi
+fi
 
 # ── [WSL 1/3] MCP client venv ─────────────────────────────────────────────────
 echo ""
