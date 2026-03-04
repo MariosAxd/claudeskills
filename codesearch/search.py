@@ -102,7 +102,7 @@ def search(query, ext=None, sub=None, limit=10,
     except Exception as e:
         msg = str(e)
         if "400" in msg or "non-indexed" in msg or "index" in msg.lower():
-            print(f"ERROR: Schema issue - re-index with: ts index --reset")
+            print(f"ERROR: Schema issue - re-index with: ts index --resethard")
         else:
             print(f"ERROR: Cannot reach Typesense — is the server running? Run: ts start")
         print(f"  Detail: {e}")

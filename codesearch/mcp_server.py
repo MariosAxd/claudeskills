@@ -395,10 +395,10 @@ def service_status(root: str = "") -> str:
             has_priority = any(f["name"] == "priority" for f in stats.get("fields", []))
             lines.append(
                 f"Root '{root_name}' ({coll_name}): {ndocs:,} docs"
-                + ("" if has_priority else "  [NO priority field — run: ts index --reset]")
+                + ("" if has_priority else "  [NO priority field — run: ts index --resethard]")
             )
         except Exception:
-            lines.append(f"Root '{root_name}' ({coll_name}): collection not found — run: ts index --root {root_name} --reset")
+            lines.append(f"Root '{root_name}' ({coll_name}): collection not found — run: ts index --root {root_name} --resethard")
 
     _watcher_stats_path = Path.home() / ".local" / "typesense" / "watcher_stats.json"
     try:

@@ -6,7 +6,7 @@ Commands:
     start     - Start server + watcher + heartbeat
     stop      - Stop server, watcher, and any running indexer
     restart   - stop then start
-    index     - Run indexer in background (add --reset to recreate collection)
+    index     - Run indexer in background (add --resethard to wipe data and reindex)
     log       - Tail the server, indexer, or heartbeat log
     watcher   - Start the file watcher standalone
     heartbeat - Start the heartbeat watchdog standalone
@@ -129,10 +129,10 @@ def cmd_status(args) -> None:
             ndocs = stats.get("num_documents", 0)
             fields = [f["name"] for f in stats.get("fields", [])]
             idx_note = "" if "priority" in fields else \
-                f"  [re-index needed: ts index --root {root_name} --reset]"
+                f"  [re-index needed: ts index --root {root_name} --resethard]"
             print(f"  [{root_name}] Index : {ndocs:,} docs  ({coll_name}){idx_note}")
         elif health["ok"]:
-            print(f"  [{root_name}] Index : '{coll_name}' not found — run: ts index --root {root_name} --reset")
+            print(f"  [{root_name}] Index : '{coll_name}' not found — run: ts index --root {root_name} --resethard")
         else:
             print(f"  [{root_name}] Index : (server unavailable)")
 
@@ -256,7 +256,7 @@ def cmd_start(args) -> None:
             indexer_alive, _ = _pid_alive(_INDEXER_PID)
             if not indexer_alive:
                 import types as _types
-                cmd_index(_types.SimpleNamespace(reset=True, root=root_name))
+                cmd_index(_types.SimpleNamespace(resethard=True, root=root_name))
                 break
             else:
                 print("  (indexer already running)")
@@ -293,12 +293,30 @@ def cmd_restart(args) -> None:
 
 
 def cmd_index(args) -> None:
+    import shutil
+
     indexer_alive, indexer_pid = _pid_alive(_INDEXER_PID)
     if indexer_alive:
         print(f"Indexer already running (PID {indexer_pid}). Stop it first with: ts stop")
         sys.exit(1)
 
-    if not _typesense_health()["ok"]:
+    if args.resethard:
+        data_dir = _RUN_DIR / "data"
+        print("Hard reset: stopping server and wiping data directory...")
+        subprocess.run([_VENV_PY, _SERVER_PY, "--stop"])
+        for pid_file in (_SERVER_PID,):
+            if os.path.exists(pid_file):
+                os.remove(pid_file)
+        time.sleep(1)
+        if data_dir.exists():
+            shutil.rmtree(str(data_dir))
+            print(f"  Wiped {data_dir}")
+        print("Restarting Typesense server...")
+        result = subprocess.run([_VENV_PY, _SERVER_PY])
+        if result.returncode != 0:
+            print("ERROR: server failed to start after resethard")
+            sys.exit(1)
+    elif not _typesense_health()["ok"]:
         print("ERROR: Typesense server is not running. Start it first with: ts start")
         sys.exit(1)
 
@@ -311,9 +329,9 @@ def cmd_index(args) -> None:
 
     coll_name = collection_for_root(root_name)
     src_path  = ROOTS[root_name]
-    flags = ["--reset"] if args.reset else []
+    flags = ["--resethard"] if args.resethard else []
 
-    print(f"Starting indexer for root '{root_name}' {'(--reset) ' if args.reset else ''}in background...")
+    print(f"Starting indexer for root '{root_name}' {'(--resethard) ' if args.resethard else ''}in background...")
     print(f"  Collection : {coll_name}")
     print(f"  Source     : {src_path}")
     print(f"  Log        : {_INDEXER_LOG}")
@@ -407,8 +425,8 @@ def main():
     sub.add_parser("restart", help="Restart server + watcher")
 
     p_idx = sub.add_parser("index", help="Run indexer in background")
-    p_idx.add_argument("--reset", action="store_true",
-                       help="Drop and recreate the collection first")
+    p_idx.add_argument("--resethard", action="store_true",
+                       help="Stop server, wipe data directory, restart, and reindex from scratch")
     p_idx.add_argument("--root", default=None,
                        help="Named root to index (default: first configured root)")
 
