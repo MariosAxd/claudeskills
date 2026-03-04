@@ -1,6 +1,6 @@
 # claudeskills
 
-A collection of MCP servers and Claude Code skills that give Claude direct access to your codebase and visualization toolchain.
+A collection of MCP servers and Claude Code skills that give Claude efficient semantic access to your codebase and a visualization toolchain.
 
 Each tool lives in its own subdirectory and registers itself as an MCP server with a single setup command.
 
