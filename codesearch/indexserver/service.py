@@ -38,11 +38,15 @@ from codesearch.indexserver.config import (
 
 # ── paths ──────────────────────────────────────────────────────────────────────
 _HOME         = Path.home()
-_RUN_DIR      = _HOME / ".local" / "typesense"
+# Support Docker: TYPESENSE_DATA env var overrides default location
+_RUN_DIR      = Path(os.environ.get("TYPESENSE_DATA", _HOME / ".local" / "typesense"))
 _RUN_DIR.mkdir(parents=True, exist_ok=True)
 
 _THIS_DIR     = Path(__file__).parent                           # codesearch/indexserver/
-_VENV_PY      = str(_HOME / ".local" / "indexserver-venv" / "bin" / "python3")
+
+# Support Docker: use system Python if venv doesn't exist
+_VENV_PY_PATH = _HOME / ".local" / "indexserver-venv" / "bin" / "python3"
+_VENV_PY      = str(_VENV_PY_PATH) if _VENV_PY_PATH.exists() else sys.executable
 _SERVER_PY    = str(_THIS_DIR / "start_server.py")
 _INDEXER_PY   = str(_THIS_DIR / "indexer.py")
 _WATCHER_PY   = str(_THIS_DIR / "watcher.py")

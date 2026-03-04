@@ -30,6 +30,76 @@ This will:
 
 Reload VS Code after running (`Ctrl+Shift+P` → Developer: Reload Window).
 
+## Docker setup (alternative)
+
+Run codesearch as a Docker container instead of installing locally. The container includes Typesense, the file watcher, and the MCP server.
+
+### Prerequisites
+
+- Docker installed and running
+- Source code directory to index
+
+### 1. Build the image
+
+```bash
+cd codesearch
+docker build -t codesearch-mcp -f docker/Dockerfile .
+```
+
+### 2. Run the container
+
+```bash
+docker run -d --name codesearch \
+    -p 3000:3000 \
+    -p:8108:8108 \
+    -v /path/to/your/source:/source:ro \
+    -v codesearch_data:/typesensedata \
+    codesearch-mcp
+```
+
+Replace `/path/to/your/source` with the path to your source code directory.
+
+- Port `3000` exposes the MCP SSE endpoint
+- `/source` is where your code is mounted (read-only)
+- `codesearch_data` volume persists the Typesense index between container restarts
+
+On first start, the container will automatically index all files in `/source`.
+
+### 3. Register with Claude Code
+
+```bash
+claude mcp add codesearch-docker --transport sse http://localhost:3000/sse
+```
+
+### Using docker-compose
+
+Alternatively, use docker-compose for easier management:
+
+```bash
+cd codesearch/docker
+
+# Set your source directory
+export SOURCE_DIR=/path/to/your/source
+
+# Start the container
+docker-compose up -d
+
+# View logs
+docker-compose logs -f
+
+# Stop
+docker-compose down
+```
+
+### Environment variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CODESEARCH_PORT` | `8108` | Typesense server port (internal) |
+| `CODESEARCH_ROOT_NAME` | `default` | Name for the source root in config |
+| `CODESEARCH_API_KEY` | (auto-generated) | Typesense API key |
+| `MCP_PORT` | `3000` | MCP SSE server port |
+
 ### 2. Start the service and build the index
 
 ```
@@ -170,6 +240,25 @@ Typical flow: Typesense narrows the haystack to ~50 candidate files → tree-sit
 > **MCP runs in WSL.** The Claude Code VSCode extension launches the MCP server via `mcp.sh`, so `mcp_server.py` runs under the WSL Python (`~/.local/mcp-venv`). This means file paths inside the MCP process must be `/mnt/x/...` style, even though `config.json` stores them as Windows `X:/...` paths. `config.to_native_path()` converts automatically based on `sys.platform`.
 >
 > Direct CLI usage (`query.py`, `search.py` invoked by hand) can run under either Windows or WSL depending on which Python you call — both are supported.
+
+### Docker topology
+
+When running in Docker, all components run in a single container:
+
+```
+┌─────────────────────────────────────────────────┐
+│  DOCKER CONTAINER                               │
+│                                                 │
+│  MCP Server (SSE) ──────────── port 3000        │
+│  Typesense Server ──────────── port 8108        │
+│  File Watcher (background)                      │
+│                                                 │
+│  /source (volume) ──── your source code         │
+│  /typesensedata (volume) ── persisted index     │
+└─────────────────────────────────────────────────┘
+```
+
+The MCP server uses SSE (Server-Sent Events) transport instead of stdio, allowing Claude Code to connect via HTTP.
 
 ### File map
 

@@ -40,7 +40,9 @@ POLL_INTERVAL_SEC = 10   # polling interval for PollingObserver on /mnt/ paths
 # ── watcher stats (files indexed since last start) ────────────────────────────
 _stats_lock = threading.Lock()
 _stats: dict = {"files_upserted": 0, "files_deleted": 0, "last_flush": None, "started_at": None}
-_STATS_FILE = Path.home() / ".local" / "typesense" / "watcher_stats.json"
+# Support Docker: TYPESENSE_DATA env var overrides default location
+_RUN_DIR = Path(os.environ.get("TYPESENSE_DATA", Path.home() / ".local" / "typesense"))
+_STATS_FILE = _RUN_DIR / "watcher_stats.json"
 
 
 def _write_stats() -> None:

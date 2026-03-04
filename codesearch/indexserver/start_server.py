@@ -27,14 +27,20 @@ if _base not in sys.path:
 from codesearch.indexserver.config import API_KEY, PORT
 
 _HOME    = Path.home()
-_RUN_DIR = _HOME / ".local" / "typesense"
+
+# Support Docker: TYPESENSE_DATA env var overrides default location
+_RUN_DIR = Path(os.environ.get("TYPESENSE_DATA", _HOME / ".local" / "typesense"))
 _RUN_DIR.mkdir(parents=True, exist_ok=True)
 
-PID_FILE      = _RUN_DIR / "typesense.pid"
-BIN_PATH      = str(_RUN_DIR / "typesense-server")
-DATA_PATH     = str(_RUN_DIR / "data")
-LOG_PATH      = str(_RUN_DIR / "typesense.log")
+PID_FILE       = _RUN_DIR / "typesense.pid"
+DATA_PATH      = str(_RUN_DIR / "data")
+LOG_PATH       = str(_RUN_DIR / "typesense.log")
 ERROR_LOG_PATH = str(_RUN_DIR / "typesense-error.log")
+
+# Docker pre-installs binary at TYPESENSE_DIR; otherwise use ~/.local/typesense
+_TYPESENSE_DIR = os.environ.get("TYPESENSE_DIR", "")
+_DOCKER_BIN = f"{_TYPESENSE_DIR}/typesense-server" if _TYPESENSE_DIR else ""
+BIN_PATH = str(_RUN_DIR / "typesense-server")
 
 
 # ── Core operations ────────────────────────────────────────────────────────────
@@ -73,8 +79,14 @@ def start():
         print(f"Typesense is already running on port {PORT}.")
         return
 
-    if not os.path.isfile(BIN_PATH) or not os.access(BIN_PATH, os.X_OK):
-        print(f"ERROR: Typesense binary not found at {BIN_PATH}.")
+    # Check for Docker-installed binary first, then fall back to default
+    if _DOCKER_BIN and os.path.isfile(_DOCKER_BIN):
+        bin_path = _DOCKER_BIN
+    else:
+        bin_path = BIN_PATH
+
+    if not os.path.isfile(bin_path) or not os.access(bin_path, os.X_OK):
+        print(f"ERROR: Typesense binary not found at {bin_path}.")
         print(f"       Run setup_mcp.cmd to install all dependencies.")
         sys.exit(1)
 
@@ -85,7 +97,7 @@ def start():
     # its child (Typesense) before exiting, keeping the stdout pipe open.
     with open(LOG_PATH, "w") as log_out, open(ERROR_LOG_PATH, "w") as log_err:
         p = subprocess.Popen(
-            [BIN_PATH,
+            [bin_path,
              f"--data-dir={DATA_PATH}",
              f"--api-key={API_KEY}",
              f"--api-port={PORT}",

@@ -44,20 +44,39 @@ ROOTS: dict[str, str] = {
 SRC_ROOT: str = ROOTS.get("default") or next(iter(ROOTS.values()), "")
 
 
+def _is_wsl() -> bool:
+    """Detect if running in WSL (vs native Linux like Docker)."""
+    # WSL sets WSL_DISTRO_NAME environment variable
+    if os.environ.get("WSL_DISTRO_NAME"):
+        return True
+    # Alternative check: WSL interop file exists
+    if os.path.exists("/proc/sys/fs/binfmt_misc/WSLInterop"):
+        return True
+    return False
+
+
 def to_native_path(path: str) -> str:
     """Convert a path (Windows or WSL) to the native format for the current process.
 
-    On Linux/WSL: converts X:/... or X:\\... to /mnt/x/...
-    On Windows:   converts /mnt/x/... to X:/..., leaves X:/... unchanged.
+    On native Linux (Docker): paths are used as-is (no /mnt/ conversion needed).
+    On WSL:    converts X:/... or X:\\... to /mnt/x/...
+    On Windows: converts /mnt/x/... to X:/..., leaves X:/... unchanged.
     Uses forward slashes on both platforms (valid on Windows too).
     """
     import sys as _sys
     path = path.replace("\\", "/")
+
     if _sys.platform == "linux":
+        # Native Linux (Docker) - paths already correct, no conversion
+        if not _is_wsl():
+            return path
+
+        # WSL - convert Windows paths to /mnt/x/... format
         m = _re.match(r"^([a-zA-Z]):(.*)", path)
         if m:
             path = f"/mnt/{m.group(1).lower()}{m.group(2)}"
     else:
+        # Windows - convert /mnt/x/... to X:/...
         m = _re.match(r"^/mnt/([a-zA-Z])/(.*)", path)
         if m:
             path = f"{m.group(1).upper()}:/{m.group(2)}"

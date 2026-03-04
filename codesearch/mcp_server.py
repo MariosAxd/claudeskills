@@ -549,7 +549,9 @@ def service_status(root: str = "") -> str:
         except Exception:
             lines.append(f"Root '{root_name}' ({coll_name}): collection not found — run: ts index --root {root_name} --resethard")
 
-    _watcher_stats_path = Path.home() / ".local" / "typesense" / "watcher_stats.json"
+    # Support Docker: TYPESENSE_DATA env var overrides default location
+    _run_dir = Path(os.environ.get("TYPESENSE_DATA", Path.home() / ".local" / "typesense"))
+    _watcher_stats_path = _run_dir / "watcher_stats.json"
     try:
         wstats  = json.loads(_watcher_stats_path.read_text(encoding="utf-8"))
         u       = wstats.get("files_upserted", 0)
@@ -566,4 +568,21 @@ def service_status(root: str = "") -> str:
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    mcp.run()
+    # Support both stdio (default) and SSE transport (for Docker)
+    # Set MCP_TRANSPORT=sse and MCP_PORT=3000 for SSE mode
+    transport = os.environ.get("MCP_TRANSPORT", "stdio").lower()
+
+    if transport == "sse":
+        mcp_port = int(os.environ.get("MCP_PORT", "3000"))
+        print(f"[mcp] Starting MCP server on http://0.0.0.0:{mcp_port}/sse", flush=True)
+
+        # FastMCP SSE requires uvicorn - run the ASGI app directly
+        import uvicorn
+        uvicorn.run(
+            mcp.sse_app(),
+            host="0.0.0.0",
+            port=mcp_port,
+            log_level="info",
+        )
+    else:
+        mcp.run()
