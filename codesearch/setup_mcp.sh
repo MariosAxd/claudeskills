@@ -83,7 +83,7 @@ echo "[WSL 1/3] MCP venv: $MCP_VENV"
 python3 -m venv "$MCP_VENV"
 "$MCP_VENV/bin/pip" install --quiet --upgrade pip
 if ! "$MCP_VENV/bin/pip" install --quiet --upgrade \
-        mcp tree-sitter tree-sitter-c-sharp; then
+        mcp tree-sitter tree-sitter-c-sharp tree-sitter-python; then
     echo "ERROR: pip install failed for MCP venv."
     echo "       Check network connectivity or proxy settings and re-run setup_mcp.cmd."
     exit 1
@@ -96,7 +96,7 @@ echo "[WSL 2/3] Indexserver venv: $IDX_VENV"
 python3 -m venv "$IDX_VENV"
 "$IDX_VENV/bin/pip" install --quiet --upgrade pip
 if ! "$IDX_VENV/bin/pip" install --quiet --upgrade \
-        typesense tree-sitter tree-sitter-c-sharp watchdog pathspec pytest; then
+        typesense tree-sitter tree-sitter-c-sharp tree-sitter-python watchdog pathspec pytest; then
     echo "ERROR: pip install failed for indexserver venv."
     echo "       Check network connectivity or proxy settings and re-run setup_mcp.cmd."
     exit 1

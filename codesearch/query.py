@@ -57,6 +57,12 @@ sys.path.insert(0, _util_dir)
 import tree_sitter_c_sharp as tscsharp
 from tree_sitter import Language, Parser
 
+try:
+    import tree_sitter_python as tspython
+    _PY_AVAILABLE = True
+except ImportError:
+    _PY_AVAILABLE = False
+
 
 def _ts_search(collection: str, params: dict) -> dict:
     """Send a search request to Typesense over HTTP (no typesense package needed)."""
@@ -69,6 +75,12 @@ def _ts_search(collection: str, params: dict) -> dict:
 
 CS = Language(tscsharp.language())
 _parser = Parser(CS)
+
+if _PY_AVAILABLE:
+    _PY = Language(tspython.language())
+    _py_parser = Parser(_PY)
+else:
+    _py_parser = None
 
 # ── AST helpers ───────────────────────────────────────────────────────────────
 
@@ -669,7 +681,287 @@ def files_from_search(query, sub=None, ext="cs", limit=50,
     return paths
 
 
-# ── File processing ───────────────────────────────────────────────────────────
+# ── Python AST query functions ────────────────────────────────────────────────
+
+_PY_LITERAL_NODES = {"comment", "string", "concatenated_string"}
+
+
+def _py_in_literal(node) -> bool:
+    p = node.parent
+    while p:
+        if p.type in _PY_LITERAL_NODES:
+            return True
+        p = p.parent
+    return False
+
+
+def _py_enclosing_class(node, src) -> str:
+    """Walk up the AST to find the nearest enclosing class name."""
+    p = node.parent
+    while p:
+        if p.type == "class_definition":
+            nn = p.child_by_field_name("name")
+            if nn:
+                return _text(nn, src).strip()
+        p = p.parent
+    return ""
+
+
+def _py_base_names(node, src) -> list:
+    """Extract base class names from a class_definition's superclasses."""
+    names = []
+    superclasses = node.child_by_field_name("superclasses")
+    if not superclasses:
+        return names
+    for child in superclasses.named_children:
+        if child.type == "identifier":
+            names.append(_text(child, src).strip())
+        elif child.type == "attribute":
+            attr = child.child_by_field_name("attribute")
+            if attr:
+                names.append(_text(attr, src).strip())
+    return names
+
+
+def py_q_classes(src, tree, lines):
+    results = []
+    for node in _find_all(tree.root_node, lambda n: n.type == "class_definition"):
+        name_node = node.child_by_field_name("name")
+        if not name_node:
+            continue
+        name = _text(name_node, src).strip()
+        bases = _py_base_names(node, src)
+        suffix = f"({', '.join(bases)})" if bases else ""
+        results.append((_line(node), f"[class] {name}{suffix}"))
+    return results
+
+
+def py_q_methods(src, tree, lines):
+    results = []
+    for node in _find_all(tree.root_node, lambda n: n.type == "function_definition"):
+        name_node = node.child_by_field_name("name")
+        if not name_node:
+            continue
+        name = _text(name_node, src).strip()
+        params_node = node.child_by_field_name("parameters")
+        return_node = node.child_by_field_name("return_type")
+        params_str = _text(params_node, src).strip() if params_node else "()"
+        ret_str = f" -> {_text(return_node, src).strip()}" if return_node else ""
+        cls = _py_enclosing_class(node, src)
+        kind = "method" if cls else "def"
+        cls_prefix = f"[in {cls}] " if cls else ""
+        results.append((_line(node), f"[{kind}] {cls_prefix}{name}{params_str}{ret_str}"))
+    return results
+
+
+def py_q_calls(src, tree, lines, method_name):
+    results = []
+    seen_rows = set()
+    for node in _find_all(tree.root_node, lambda n: n.type == "call"):
+        if _py_in_literal(node):
+            continue
+        fn = node.child_by_field_name("function")
+        if not fn:
+            continue
+        matched = None
+        if fn.type == "identifier":
+            matched = _text(fn, src).strip()
+        elif fn.type == "attribute":
+            attr = fn.child_by_field_name("attribute")
+            if attr:
+                matched = _text(attr, src).strip()
+        if matched != method_name:
+            continue
+        row = node.start_point[0]
+        if row in seen_rows:
+            continue
+        seen_rows.add(row)
+        raw = _text(node, src).replace("\n", " ").replace("\r", "")
+        if len(raw) > 140:
+            raw = raw[:140] + "…"
+        results.append((_line(node), raw))
+    return results
+
+
+def py_q_implements(src, tree, lines, base_name):
+    results = []
+    for node in _find_all(tree.root_node, lambda n: n.type == "class_definition"):
+        name_node = node.child_by_field_name("name")
+        if not name_node:
+            continue
+        bases = _py_base_names(node, src)
+        if base_name not in bases:
+            continue
+        name = _text(name_node, src).strip()
+        results.append((_line(node), f"[class] {name}({', '.join(bases)})"))
+    return results
+
+
+def py_q_ident(src, tree, lines, name):
+    results = []
+    seen_rows = set()
+    for node in _find_all(tree.root_node, lambda n: n.type == "identifier"):
+        if _text(node, src) != name:
+            continue
+        if _py_in_literal(node):
+            continue
+        row = node.start_point[0]
+        if row in seen_rows:
+            continue
+        seen_rows.add(row)
+        line_text = lines[row].strip() if row < len(lines) else ""
+        results.append((_line(node), line_text))
+    return results
+
+
+def py_q_find(src, tree, lines, name):
+    results = []
+    for node in _find_all(tree.root_node,
+                          lambda n: n.type in ("function_definition", "class_definition")):
+        name_node = node.child_by_field_name("name")
+        if not name_node or _text(name_node, src).strip() != name:
+            continue
+        kind = "class" if node.type == "class_definition" else "def"
+        start_row = node.start_point[0]
+        end_row = node.end_point[0]
+        body_lines = "\n".join(lines[start_row:end_row + 1])
+        header = f"── [{kind}] {name}  (lines {start_row + 1}–{end_row + 1}) ──"
+        results.append((_line(node), f"{header}\n{body_lines}"))
+    return results
+
+
+def py_q_decorators(src, tree, lines, name=None):
+    results = []
+    for node in _find_all(tree.root_node, lambda n: n.type == "decorator"):
+        full = _text(node, src).strip()
+        dname = full.lstrip("@").split("(")[0].split(".")[-1].strip()
+        if name and dname != name:
+            continue
+        results.append((_line(node), full))
+    return results
+
+
+def py_q_imports(src, tree, lines):
+    results = []
+    for node in _find_all(tree.root_node,
+                          lambda n: n.type in ("import_statement", "import_from_statement")):
+        results.append((_line(node), _text(node, src).strip()))
+    return results
+
+
+def py_q_params(src, tree, lines, method_name):
+    results = []
+    for node in _find_all(tree.root_node, lambda n: n.type == "function_definition"):
+        name_node = node.child_by_field_name("name")
+        if not name_node or _text(name_node, src).strip() != method_name:
+            continue
+        params_node = node.child_by_field_name("parameters")
+        if not params_node:
+            results.append((_line(node), "(no parameters)"))
+            continue
+        param_lines = []
+        for p in params_node.named_children:
+            if p.type == "identifier":
+                param_lines.append(f"  {_text(p, src)}")
+            elif p.type in ("typed_parameter", "typed_default_parameter"):
+                # Name is the first identifier child (not a named field in tree-sitter-python)
+                pname = next((_text(c, src) for c in p.named_children
+                              if c.type == "identifier"), "")
+                ptype = p.child_by_field_name("type")
+                pt_txt = f": {_text(ptype, src)}" if ptype else ""
+                dval = p.child_by_field_name("value") if p.type == "typed_default_parameter" else None
+                dv_txt = f" = {_text(dval, src)}" if dval else ""
+                param_lines.append(f"  {pname}{pt_txt}{dv_txt}")
+            elif p.type == "default_parameter":
+                pname = next((_text(c, src) for c in p.named_children
+                              if c.type == "identifier"), "")
+                dval = p.child_by_field_name("value")
+                dv_txt = f" = {_text(dval, src)}" if dval else ""
+                param_lines.append(f"  {pname}{dv_txt}")
+            elif p.type in ("list_splat_pattern", "dictionary_splat_pattern",
+                            "keyword_separator", "positional_separator"):
+                param_lines.append(f"  {_text(p, src)}")
+        results.append((_line(node), "\n".join(param_lines) or "(no parameters)"))
+    return results
+
+
+# ── Python file processing ────────────────────────────────────────────────────
+
+def process_py_file(path, mode, mode_arg, show_path, count_only, context=0, src_root=None):
+    if not _PY_AVAILABLE or _py_parser is None:
+        print(f"ERROR: tree-sitter-python not installed. "
+              f"Run: pip install tree-sitter-python", file=sys.stderr)
+        return 0
+    try:
+        src_bytes = open(path, "rb").read()
+    except OSError as e:
+        print(f"ERROR reading {path}: {e}", file=sys.stderr)
+        return 0
+    try:
+        tree = _py_parser.parse(src_bytes)
+    except Exception as e:
+        print(f"ERROR parsing {path}: {e}", file=sys.stderr)
+        return 0
+
+    lines = src_bytes.decode("utf-8", errors="replace").splitlines()
+
+    dispatch = {
+        "classes":    lambda: py_q_classes(src_bytes, tree, lines),
+        "methods":    lambda: py_q_methods(src_bytes, tree, lines),
+        "calls":      lambda: py_q_calls(src_bytes, tree, lines, mode_arg),
+        "implements": lambda: py_q_implements(src_bytes, tree, lines, mode_arg),
+        "ident":      lambda: py_q_ident(src_bytes, tree, lines, mode_arg),
+        "find":       lambda: py_q_find(src_bytes, tree, lines, mode_arg),
+        "decorators": lambda: py_q_decorators(src_bytes, tree, lines, mode_arg),
+        "imports":    lambda: py_q_imports(src_bytes, tree, lines),
+        "params":     lambda: py_q_params(src_bytes, tree, lines, mode_arg),
+    }
+
+    fn = dispatch.get(mode)
+    if not fn:
+        print(f"Unknown mode: {mode!r}", file=sys.stderr)
+        return 0
+
+    results = fn()
+    if not results:
+        return 0
+
+    from codesearch.config import SRC_ROOT as _SRC_ROOT
+    _effective_root = (src_root or _SRC_ROOT).rstrip("/").replace("\\", "/")
+    _path_norm = path.replace("\\", "/")
+    if _effective_root and _path_norm.lower().startswith(_effective_root.lower() + "/"):
+        _disp_base = _path_norm[len(_effective_root) + 1:]
+    else:
+        _disp_base = _path_norm
+
+    if count_only:
+        print(f"{len(results):4d}  {_disp_base}")
+        return len(results)
+
+    disp_path = _disp_base
+    for line_num_str, text in results:
+        if show_path:
+            print(f"{disp_path}:{line_num_str}: {text}")
+        else:
+            print(f"{line_num_str}: {text}")
+
+        if context > 0 and mode not in ("find",):
+            try:
+                row = int(line_num_str) - 1
+                start = max(0, row - context)
+                end = min(len(lines), row + context + 1)
+                for i, ln in enumerate(lines[start:end], start):
+                    if i == row:
+                        continue
+                    prefix = f"  {disp_path}:{i + 1}-" if show_path else f"  {i + 1}-"
+                    print(f"{prefix} {ln}")
+                print()
+            except (ValueError, IndexError):
+                pass
+    return len(results)
+
+
+# ── C# file processing ────────────────────────────────────────────────────────
 
 def process_file(path, mode, mode_arg, show_path, count_only, context=0, src_root=None):
     try:

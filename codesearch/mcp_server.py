@@ -18,6 +18,7 @@ Restart / reload instructions:
 Tools:
     search_code    - Typesense full-text / semantic search across the index
     query_cs       - tree-sitter structural C# query (uses/calls/implements/...)
+    query_py       - tree-sitter structural Python query (classes/methods/calls/...)
     service_status - Check if Typesense is running and how many docs are indexed
 """
 
@@ -338,6 +339,154 @@ def query_cs(
         return (_prefilter_note or "") + f"No matches found (searched {len(file_list)} files)."
 
     # Cap output to ~200 lines to avoid context overflow
+    output_lines = output.splitlines()
+    if len(output_lines) > 200:
+        output = "\n".join(output_lines[:200])
+        output += f"\n\n[truncated — {len(output_lines) - 200} more lines]"
+
+    return _prefilter_note + output
+
+
+@mcp.tool()
+def query_py(
+    mode:          str,
+    pattern:       str = "",
+    search_query:  str = "",
+    search_sub:    str = "",
+    files:         str = "",
+    context_lines: int = 0,
+    count_only:    bool = False,
+    root:          str = "",
+) -> str:
+    """
+    Structural Python AST query using tree-sitter.
+    Semantically precise: skips comments and string literals, understands syntax.
+    Use instead of text search when you need exact call sites, class hierarchies, etc.
+
+    Args:
+        mode:          Query type — one of:
+                       "classes"    all class definitions with base classes
+                       "methods"    all function/method definitions with signatures
+                       "calls"      every call site of a function/method name
+                       "implements" classes that inherit from the given base class
+                       "ident"      every identifier occurrence (semantic grep)
+                       "find"       full source body of function/class named NAME
+                       "decorators" all decorators, optionally filtered by name
+                       "imports"    all import statements
+                       "params"     parameter list of a function
+        pattern:       The name to search for.
+                       Required for: calls, implements, ident, find, params.
+                       Optional for: decorators (filters by decorator name when provided).
+        search_query:  Typesense query to pre-filter files (STRONGLY RECOMMENDED).
+                       Finds ~50 most relevant Python files before tree-sitter parsing.
+                       Example: use "MyBaseClass" to find files mentioning MyBaseClass.
+        search_sub:    Subsystem to scope the Typesense pre-filter search.
+                       Example: "myapp", "services", "core".
+        files:         Glob pattern for direct file query. $SRC_ROOT is substituted.
+                       Examples: "$SRC_ROOT/myapp/**/*.py"
+                       Use this for comprehensive searches (scans every file).
+        context_lines: Surrounding source lines to show per match (like grep -C N).
+        count_only:    Return match counts per file instead of full match text.
+        root:          Named source root to query (empty = default root).
+
+    Examples:
+        query_py("classes", search_query="MyBaseClass")
+        query_py("calls", "fetch_data", search_query="fetch_data", search_sub="myapp")
+        query_py("implements", "BaseHandler", search_query="BaseHandler")
+        query_py("methods", files="$SRC_ROOT/myapp/services/processor.py")
+        query_py("find", "process", files="$SRC_ROOT/myapp/processor.py")
+        query_py("decorators", "route", search_query="route", search_sub="myapp")
+        query_py("params", "fetch_data", search_query="fetch_data")
+    """
+    import glob as _glob
+    from codesearch.query import process_py_file
+    from codesearch.config import get_root, ROOTS
+
+    try:
+        _collection, _src_root = get_root(root)
+    except ValueError as e:
+        return f"Error: {e}\nConfigured roots: {', '.join(sorted(ROOTS))}"
+
+    VALID_MODES = ("classes", "methods", "calls", "implements", "ident",
+                   "find", "decorators", "imports", "params")
+
+    m = mode.lower().strip()
+    if m not in VALID_MODES:
+        return f"Unknown mode: {mode!r}. Valid modes: {', '.join(VALID_MODES)}"
+
+    _PATTERN_REQUIRED = ("calls", "implements", "ident", "find", "params")
+    if m in _PATTERN_REQUIRED and not pattern:
+        return (f"Mode '{m}' requires a pattern argument. "
+                f"Example: query_py('{m}', 'FunctionOrClassName', search_query='...')")
+
+    # ── Resolve file list ─────────────────────────────────────────────────────
+    _prefilter_note = ""
+
+    if search_query:
+        file_list = _do_files_from_search(
+            search_query, sub=search_sub or None, ext="py", limit=50,
+            collection=_collection, src_root=_src_root,
+        )
+    elif files:
+        files = _normalize_files_glob(files, src_root=_src_root)
+        _FILE_LIMIT = 250
+        file_list = []
+        for _f in _glob.iglob(files, recursive=True):
+            if os.path.isfile(_f):
+                file_list.append(_f)
+                if len(file_list) > _FILE_LIMIT:
+                    break
+        if not file_list:
+            return f"No files found matching glob: {files}"
+        if len(file_list) > _FILE_LIMIT:
+            sq = pattern or "your search term"
+            return (
+                f"Glob matched >{_FILE_LIMIT} files — too broad for tree-sitter scanning.\n"
+                f"Use search_query to pre-filter via Typesense instead:\n"
+                f"  query_py('{m}', '{pattern}', search_query='{sq}', search_sub='mymodule')\n"
+                f"Or use search_code('{sq}', ext='py') to locate relevant files first."
+            )
+        file_list.sort()
+        _prefilter_note = f"[glob: {len(file_list)} files]\n"
+    else:
+        return ("Provide either search_query (recommended for large codebases) "
+                "or a files glob pattern.")
+
+    if not file_list:
+        return "No matching Python files found in index or on disk."
+
+    # ── Run tree-sitter query ─────────────────────────────────────────────────
+    buf = io.StringIO()
+    sys.stdout, old = buf, sys.stdout
+    match_counts: dict[str, int] = {}
+    try:
+        for fpath in file_list:
+            n = process_py_file(
+                path       = fpath,
+                mode       = m,
+                mode_arg   = pattern,
+                show_path  = True,
+                count_only = False,
+                context    = context_lines,
+                src_root   = _src_root,
+            )
+            if n:
+                match_counts[fpath] = n
+    finally:
+        sys.stdout = old
+
+    if count_only:
+        rows = sorted(match_counts.items(), key=lambda x: -x[1])
+        lines_out = [f"  {n:4d}  {os.path.basename(p)}" for p, n in rows]
+        total = sum(match_counts.values())
+        lines_out.append(f"\nTotal: {total} matches in {len(match_counts)} files "
+                         f"(searched {len(file_list)} files)")
+        return _prefilter_note + "\n".join(lines_out)
+
+    output = buf.getvalue().strip()
+    if not output:
+        return (_prefilter_note or "") + f"No matches found (searched {len(file_list)} files)."
+
     output_lines = output.splitlines()
     if len(output_lines) > 200:
         output = "\n".join(output_lines[:200])

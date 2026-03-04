@@ -30,8 +30,9 @@ if _claudeskills not in sys.path:
     sys.path.insert(0, _claudeskills)
 
 from codesearch.indexserver.config import HOST, PORT, API_KEY
-from codesearch.indexserver.indexer import run_index, extract_cs_metadata
+from codesearch.indexserver.indexer import run_index, extract_cs_metadata, extract_py_metadata
 from codesearch.query import process_file as _query_process_file
+from codesearch.query import process_py_file as _query_process_py_file
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -1171,6 +1172,455 @@ class TestCsChangeHandlerIntegration(unittest.TestCase):
         with _wmod._stats_lock:
             self.assertGreater(_wmod._stats["files_upserted"], 0,
                                "stats.files_upserted should increment after real upsert")
+
+
+# ── sample Python source ──────────────────────────────────────────────────────
+
+_FOO_PY = """\
+import os
+from typing import Optional
+
+class IFoo:
+    def process(self, data: str) -> None:
+        pass
+
+class IComparable:
+    def compare(self, other) -> int:
+        return 0
+
+def dataclass(cls):
+    return cls
+
+@dataclass
+class Foo(IFoo, IComparable):
+    name: str = ""
+
+    def process(self, data: str) -> None:
+        print(data)
+
+    def compute(self, value: int) -> Optional[str]:
+        return str(value)
+"""
+
+_BAR_PY = """\
+from myapp.foo import Foo
+
+class Bar(Foo):
+    def __init__(self, foo: Foo) -> None:
+        self._foo = foo
+
+    def run(self) -> None:
+        self._foo.process("hello")
+"""
+
+
+# ── test: extract_py_metadata unit tests (no server) ─────────────────────────
+
+class TestExtractPyMetadata(unittest.TestCase):
+    """Unit tests for extract_py_metadata — no server needed."""
+
+    def _meta(self, src):
+        return extract_py_metadata(src.encode())
+
+    def test_class_names(self):
+        meta = self._meta(_FOO_PY)
+        self.assertIn("Foo", meta["class_names"],
+                      f"class_names: {meta['class_names']}")
+
+    def test_class_names_multiple(self):
+        meta = self._meta(_FOO_PY)
+        self.assertIn("IFoo", meta["class_names"],
+                      f"class_names: {meta['class_names']}")
+
+    def test_base_types_interface(self):
+        meta = self._meta(_FOO_PY)
+        self.assertIn("IFoo", meta["base_types"],
+                      f"base_types: {meta['base_types']}")
+
+    def test_base_types_multiple(self):
+        meta = self._meta(_FOO_PY)
+        self.assertIn("IComparable", meta["base_types"],
+                      f"base_types: {meta['base_types']}")
+
+    def test_base_types_subclass(self):
+        meta = self._meta(_BAR_PY)
+        self.assertIn("Foo", meta["base_types"],
+                      f"base_types for Bar: {meta['base_types']}")
+
+    def test_method_names(self):
+        meta = self._meta(_FOO_PY)
+        self.assertIn("process", meta["method_names"],
+                      f"method_names: {meta['method_names']}")
+
+    def test_method_names_multiple(self):
+        meta = self._meta(_FOO_PY)
+        self.assertIn("compute", meta["method_names"],
+                      f"method_names: {meta['method_names']}")
+
+    def test_method_sigs_contains_function_name(self):
+        meta = self._meta(_FOO_PY)
+        sigs = meta["method_sigs"]
+        self.assertTrue(any("process" in s for s in sigs),
+                        f"method_sigs: {sigs}")
+
+    def test_method_sigs_include_return_type(self):
+        meta = self._meta(_FOO_PY)
+        sigs = meta["method_sigs"]
+        self.assertTrue(any("Optional" in s for s in sigs),
+                        f"method_sigs should include return type: {sigs}")
+
+    def test_call_sites(self):
+        meta = self._meta(_BAR_PY)
+        self.assertIn("process", meta["call_sites"],
+                      f"call_sites: {meta['call_sites']}")
+
+    def test_decorators_in_attributes(self):
+        meta = self._meta(_FOO_PY)
+        self.assertIn("dataclass", meta["attributes"],
+                      f"attributes (decorators): {meta['attributes']}")
+
+    def test_imports_in_usings(self):
+        meta = self._meta(_FOO_PY)
+        self.assertIn("os", meta["usings"],
+                      f"usings (imports): {meta['usings']}")
+
+    def test_from_imports_in_usings(self):
+        meta = self._meta(_FOO_PY)
+        self.assertIn("typing", meta["usings"],
+                      f"usings (from-imports): {meta['usings']}")
+
+    def test_from_imports_top_level_module(self):
+        meta = self._meta(_BAR_PY)
+        self.assertIn("myapp", meta["usings"],
+                      f"usings should contain top-level 'myapp': {meta['usings']}")
+
+    def test_type_refs_from_annotations(self):
+        meta = self._meta(_FOO_PY)
+        self.assertIn("Optional", meta["type_refs"],
+                      f"type_refs: {meta['type_refs']}")
+
+    def test_namespace_empty(self):
+        meta = self._meta(_FOO_PY)
+        self.assertEqual(meta["namespace"], "",
+                         "Python files have no namespace")
+
+
+# ── test: process_py_file / query_py modes (no server) ───────────────────────
+
+class TestQueryPy(unittest.TestCase):
+    """Unit tests for process_py_file() — no server needed.
+
+    Verifies:
+    1. Each query mode extracts the expected output from sample Python files.
+    2. The AST fields extract_py_metadata indexes are consistent with process_py_file.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmpdir = tempfile.mkdtemp(prefix="ts_qpy_test_")
+        cls.foo_path = os.path.join(cls.tmpdir, "foo.py")
+        cls.bar_path = os.path.join(cls.tmpdir, "bar.py")
+        with open(cls.foo_path, "w", encoding="utf-8") as f:
+            f.write(_FOO_PY)
+        with open(cls.bar_path, "w", encoding="utf-8") as f:
+            f.write(_BAR_PY)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmpdir, ignore_errors=True)
+
+    def _run(self, path, mode, mode_arg=None):
+        buf = io.StringIO()
+        old = sys.stdout
+        sys.stdout = buf
+        try:
+            n = _query_process_py_file(
+                path=path, mode=mode, mode_arg=mode_arg,
+                show_path=True, count_only=False, context=0,
+                src_root=self.tmpdir,
+            )
+        finally:
+            sys.stdout = old
+        return n or 0, buf.getvalue()
+
+    # ── mode: classes ──────────────────────────────────────────────────────────
+
+    def test_classes_lists_foo(self):
+        n, out = self._run(self.foo_path, "classes")
+        self.assertGreater(n, 0)
+        self.assertIn("Foo", out)
+
+    def test_classes_shows_base_types(self):
+        n, out = self._run(self.foo_path, "classes")
+        self.assertIn("IFoo", out)
+
+    def test_classes_multiple_bases(self):
+        n, out = self._run(self.foo_path, "classes")
+        self.assertIn("IComparable", out)
+
+    # ── mode: methods ──────────────────────────────────────────────────────────
+
+    def test_methods_lists_process(self):
+        n, out = self._run(self.foo_path, "methods")
+        self.assertGreater(n, 0)
+        self.assertIn("process", out)
+
+    def test_methods_lists_compute(self):
+        n, out = self._run(self.foo_path, "methods")
+        self.assertIn("compute", out)
+
+    def test_methods_shows_class_context(self):
+        n, out = self._run(self.foo_path, "methods")
+        self.assertIn("[in Foo]", out)
+
+    def test_methods_shows_return_type(self):
+        n, out = self._run(self.foo_path, "methods")
+        self.assertIn("Optional", out)
+
+    # ── mode: calls ───────────────────────────────────────────────────────────
+
+    def test_calls_found_in_bar(self):
+        n, out = self._run(self.bar_path, "calls", "process")
+        self.assertGreater(n, 0)
+        self.assertIn("process", out)
+
+    def test_calls_absent_method_no_match(self):
+        n, out = self._run(self.foo_path, "calls", "nonexistent_function_xyz")
+        self.assertEqual(n, 0)
+
+    # ── mode: implements ──────────────────────────────────────────────────────
+
+    def test_implements_ifoo_finds_foo(self):
+        n, out = self._run(self.foo_path, "implements", "IFoo")
+        self.assertGreater(n, 0)
+        self.assertIn("Foo", out)
+
+    def test_implements_foo_finds_bar(self):
+        n, out = self._run(self.bar_path, "implements", "Foo")
+        self.assertGreater(n, 0)
+        self.assertIn("Bar", out)
+
+    def test_implements_nonexistent_no_match(self):
+        n, out = self._run(self.foo_path, "implements", "INonExistent999")
+        self.assertEqual(n, 0)
+
+    # ── mode: ident ───────────────────────────────────────────────────────────
+
+    def test_ident_finds_foo(self):
+        n, out = self._run(self.foo_path, "ident", "Foo")
+        self.assertGreater(n, 0)
+        self.assertIn("Foo", out)
+
+    def test_ident_absent_no_match(self):
+        n, out = self._run(self.foo_path, "ident", "ZZZNonExistentXXX")
+        self.assertEqual(n, 0)
+
+    # ── mode: find ────────────────────────────────────────────────────────────
+
+    def test_find_returns_source(self):
+        n, out = self._run(self.foo_path, "find", "process")
+        self.assertGreater(n, 0)
+        self.assertIn("process", out)
+        self.assertIn("def process", out)
+
+    def test_find_class_returns_full_body(self):
+        n, out = self._run(self.foo_path, "find", "Foo")
+        self.assertGreater(n, 0)
+        self.assertIn("class Foo", out)
+
+    # ── mode: decorators ──────────────────────────────────────────────────────
+
+    def test_decorators_found(self):
+        n, out = self._run(self.foo_path, "decorators")
+        self.assertGreater(n, 0)
+        self.assertIn("dataclass", out)
+
+    def test_decorators_filtered_by_name(self):
+        n, out = self._run(self.foo_path, "decorators", "dataclass")
+        self.assertGreater(n, 0)
+        self.assertIn("dataclass", out)
+
+    def test_decorators_filter_no_match(self):
+        n, out = self._run(self.foo_path, "decorators", "nonexistent_decorator_xyz")
+        self.assertEqual(n, 0)
+
+    # ── mode: imports ─────────────────────────────────────────────────────────
+
+    def test_imports_found(self):
+        n, out = self._run(self.foo_path, "imports")
+        self.assertGreater(n, 0)
+        self.assertIn("import", out)
+
+    def test_imports_shows_os(self):
+        n, out = self._run(self.foo_path, "imports")
+        self.assertIn("os", out)
+
+    def test_imports_shows_from_import(self):
+        n, out = self._run(self.foo_path, "imports")
+        self.assertIn("typing", out)
+
+    # ── mode: params ──────────────────────────────────────────────────────────
+
+    def test_params_found(self):
+        n, out = self._run(self.foo_path, "params", "process")
+        self.assertGreater(n, 0)
+
+    def test_params_shows_types(self):
+        n, out = self._run(self.foo_path, "params", "process")
+        self.assertIn("str", out)
+
+    # ── relative path display ─────────────────────────────────────────────────
+
+    def test_display_path_is_relative(self):
+        n, out = self._run(self.foo_path, "classes")
+        self.assertGreater(n, 0)
+        self.assertIn("foo.py", out)
+        tmpdir_norm = self.tmpdir.replace("\\", "/")
+        self.assertNotIn(tmpdir_norm, out,
+                         f"full tmpdir path leaked into output:\n{out}")
+
+    # ── consistency: process_py_file ↔ extract_py_metadata ───────────────────
+
+    def test_class_names_consistent(self):
+        """class_names from indexer match what process_py_file classes mode finds."""
+        meta = extract_py_metadata(_FOO_PY.encode())
+        self.assertIn("Foo", meta["class_names"])
+        n, out = self._run(self.foo_path, "classes")
+        self.assertIn("Foo", out)
+
+    def test_base_types_consistent(self):
+        """base_types from indexer match what process_py_file implements mode uses."""
+        meta = extract_py_metadata(_FOO_PY.encode())
+        self.assertIn("IFoo", meta["base_types"])
+        n, out = self._run(self.foo_path, "implements", "IFoo")
+        self.assertGreater(n, 0)
+
+    def test_method_names_consistent(self):
+        """method_names from indexer match what process_py_file methods mode finds."""
+        meta = extract_py_metadata(_FOO_PY.encode())
+        self.assertIn("process", meta["method_names"])
+        n, out = self._run(self.foo_path, "methods")
+        self.assertIn("process", out)
+
+    def test_call_sites_consistent(self):
+        """call_sites from indexer match what process_py_file calls mode finds."""
+        meta = extract_py_metadata(_BAR_PY.encode())
+        self.assertIn("process", meta["call_sites"])
+        n, out = self._run(self.bar_path, "calls", "process")
+        self.assertGreater(n, 0)
+
+    def test_decorators_consistent(self):
+        """attributes (decorators) from indexer match process_py_file decorators mode."""
+        meta = extract_py_metadata(_FOO_PY.encode())
+        self.assertIn("dataclass", meta["attributes"])
+        n, out = self._run(self.foo_path, "decorators", "dataclass")
+        self.assertGreater(n, 0)
+
+    def test_imports_consistent(self):
+        """usings (imports) from indexer match process_py_file imports mode."""
+        meta = extract_py_metadata(_FOO_PY.encode())
+        self.assertIn("os", meta["usings"])
+        n, out = self._run(self.foo_path, "imports")
+        self.assertIn("os", out)
+
+    def test_method_sigs_consistent(self):
+        """method_sigs from indexer match what process_py_file methods mode shows."""
+        meta = extract_py_metadata(_FOO_PY.encode())
+        sigs = meta["method_sigs"]
+        self.assertTrue(any("process" in s for s in sigs), f"method_sigs: {sigs}")
+        n, out = self._run(self.foo_path, "methods")
+        self.assertIn("process", out)
+
+
+# ── test: Python semantic fields indexed by Typesense ────────────────────────
+
+@unittest.skipUnless(_server_ok(), "Typesense not running — start with: ts start")
+class TestPySemanticFields(unittest.TestCase):
+    """Verify that Python files get their semantic fields indexed by Typesense."""
+
+    @classmethod
+    def setUpClass(cls):
+        stamp = int(time.time())
+        cls.coll = f"test_pysem_{stamp}"
+        cls.tmpdir = _make_git_repo({
+            "myapp/foo.py": _FOO_PY,
+            "myapp/bar.py": _BAR_PY,
+        })
+        run_index(src_root=cls.tmpdir, collection=cls.coll, reset=True, verbose=False)
+        time.sleep(0.3)
+
+    @classmethod
+    def tearDownClass(cls):
+        _delete_collection(cls.coll)
+        shutil.rmtree(cls.tmpdir, ignore_errors=True)
+
+    def _get(self, filename):
+        hits = _search(self.coll, os.path.splitext(filename)[0],
+                       query_by="filename,symbols,class_names,method_names,content")
+        return next((h for h in hits if h["filename"] == filename), None)
+
+    def test_py_class_names_indexed(self):
+        foo = self._get("foo.py")
+        self.assertIsNotNone(foo, "foo.py not found in index")
+        self.assertIn("Foo", foo.get("class_names", []),
+                      f"class_names: {foo.get('class_names')}")
+
+    def test_py_method_names_indexed(self):
+        foo = self._get("foo.py")
+        self.assertIsNotNone(foo)
+        self.assertIn("process", foo.get("method_names", []),
+                      f"method_names: {foo.get('method_names')}")
+
+    def test_py_base_types_indexed(self):
+        foo = self._get("foo.py")
+        self.assertIsNotNone(foo)
+        self.assertIn("IFoo", foo.get("base_types", []),
+                      f"base_types: {foo.get('base_types')}")
+
+    def test_py_subclass_base_types_indexed(self):
+        bar = self._get("bar.py")
+        self.assertIsNotNone(bar, "bar.py not found in index")
+        self.assertIn("Foo", bar.get("base_types", []),
+                      f"base_types for Bar: {bar.get('base_types')}")
+
+    def test_py_call_sites_indexed(self):
+        bar = self._get("bar.py")
+        self.assertIsNotNone(bar)
+        self.assertIn("process", bar.get("call_sites", []),
+                      f"call_sites: {bar.get('call_sites')}")
+
+    def test_py_decorators_in_attributes(self):
+        foo = self._get("foo.py")
+        self.assertIsNotNone(foo)
+        self.assertIn("dataclass", foo.get("attributes", []),
+                      f"attributes (decorators): {foo.get('attributes')}")
+
+    def test_py_imports_in_usings(self):
+        foo = self._get("foo.py")
+        self.assertIsNotNone(foo)
+        self.assertIn("os", foo.get("usings", []),
+                      f"usings: {foo.get('usings')}")
+
+    def test_py_base_types_searchable_via_typesense(self):
+        """'implements' mode: query_by=base_types finds foo.py via IFoo."""
+        hits = _search(self.coll, "IFoo", query_by="base_types,class_names,filename")
+        names = [h["filename"] for h in hits]
+        self.assertIn("foo.py", names,
+                      f"base_types query for 'IFoo' → {names}")
+
+    def test_py_call_sites_searchable_via_typesense(self):
+        """'callers' mode: query_by=call_sites finds bar.py via process."""
+        hits = _search(self.coll, "process", query_by="call_sites,filename")
+        names = [h["filename"] for h in hits]
+        self.assertIn("bar.py", names,
+                      f"call_sites query for 'process' → {names}")
+
+    def test_py_method_sigs_searchable_via_typesense(self):
+        """'sig' mode: query_by=method_sigs finds foo.py via process."""
+        hits = _search(self.coll, "process", query_by="method_sigs,method_names,filename")
+        names = [h["filename"] for h in hits]
+        self.assertIn("foo.py", names,
+                      f"method_sigs query for 'process' → {names}")
 
 
 if __name__ == "__main__":

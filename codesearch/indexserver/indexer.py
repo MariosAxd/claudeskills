@@ -23,6 +23,12 @@ import typesense
 import tree_sitter_c_sharp as tscsharp
 from tree_sitter import Language, Parser
 
+try:
+    import tree_sitter_python as tspython
+    _PY_AVAILABLE = True
+except ImportError:
+    _PY_AVAILABLE = False
+
 from codesearch.indexserver.config import (
     TYPESENSE_CLIENT_CONFIG, COLLECTION, SRC_ROOT,
     INCLUDE_EXTENSIONS, EXCLUDE_DIRS, MAX_FILE_BYTES, MAX_CONTENT_CHARS,
@@ -50,6 +56,12 @@ _SRC_ROOT_NATIVE = _to_native_path(SRC_ROOT)
 
 CS = Language(tscsharp.language())
 _parser = Parser(CS)
+
+if _PY_AVAILABLE:
+    _PY = Language(tspython.language())
+    _py_parser = Parser(_PY)
+else:
+    _py_parser = None
 
 
 # ---------------------------------------------------------------------------
@@ -310,6 +322,113 @@ def extract_cs_metadata(src_bytes: bytes) -> dict:
     }
 
 
+def extract_py_metadata(src_bytes: bytes) -> dict:
+    """Extract Python metadata for tier 1+2 semantic indexing."""
+    _empty = {
+        "namespace": "", "class_names": [], "method_names": [],
+        "base_types": [], "call_sites": [], "method_sigs": [],
+        "type_refs": [], "attributes": [], "usings": [],
+    }
+    if not _PY_AVAILABLE or _py_parser is None:
+        return _empty
+    try:
+        tree = _py_parser.parse(src_bytes)
+    except Exception:
+        return _empty
+
+    root = tree.root_node
+    class_names = []
+    method_names = []
+    base_types = []
+    call_sites = []
+    method_sigs = []
+    type_refs = []
+    attributes = []
+    usings = []
+
+    # Classes and base types
+    for node in _find_all(root, lambda n: n.type == "class_definition"):
+        name_node = node.child_by_field_name("name")
+        if name_node:
+            class_names.append(_node_text(name_node, src_bytes))
+        superclasses = node.child_by_field_name("superclasses")
+        if superclasses:
+            for child in superclasses.named_children:
+                if child.type == "identifier":
+                    base_types.append(_node_text(child, src_bytes))
+                elif child.type == "attribute":
+                    attr = child.child_by_field_name("attribute")
+                    if attr:
+                        base_types.append(_node_text(attr, src_bytes))
+
+    # Functions/methods — names, signatures, type refs
+    for node in _find_all(root, lambda n: n.type == "function_definition"):
+        name_node = node.child_by_field_name("name")
+        if name_node:
+            method_names.append(_node_text(name_node, src_bytes))
+        params_node = node.child_by_field_name("parameters")
+        return_node = node.child_by_field_name("return_type")
+        if name_node and params_node:
+            mname = _node_text(name_node, src_bytes)
+            params_txt = _node_text(params_node, src_bytes)
+            ret_txt = _node_text(return_node, src_bytes).strip() if return_node else ""
+            sig = f"def {mname}{params_txt}"
+            if ret_txt:
+                sig += f" -> {ret_txt}"
+            method_sigs.append(sig)
+        if return_node:
+            type_refs.extend(_expand_type_refs(_node_text(return_node, src_bytes).strip()))
+        if params_node:
+            for param in params_node.named_children:
+                if param.type in ("typed_parameter", "typed_default_parameter"):
+                    ptype = param.child_by_field_name("type")
+                    if ptype:
+                        type_refs.extend(_expand_type_refs(_node_text(ptype, src_bytes).strip()))
+
+    # Decorators (stored in "attributes" field for consistency)
+    for node in _find_all(root, lambda n: n.type == "decorator"):
+        full_text = _node_text(node, src_bytes).strip().lstrip("@")
+        dname = full_text.split("(")[0].split(".")[-1].strip()
+        if dname:
+            attributes.append(dname)
+
+    # Call sites
+    for node in _find_all(root, lambda n: n.type == "call"):
+        fn = node.child_by_field_name("function")
+        if fn:
+            if fn.type == "identifier":
+                call_sites.append(_node_text(fn, src_bytes))
+            elif fn.type == "attribute":
+                attr = fn.child_by_field_name("attribute")
+                if attr:
+                    call_sites.append(_node_text(attr, src_bytes))
+
+    # Imports (stored in "usings" field for consistency)
+    for node in _find_all(root, lambda n: n.type == "import_statement"):
+        for child in node.named_children:
+            if child.type == "dotted_name":
+                usings.append(_node_text(child, src_bytes).split(".")[0])
+            elif child.type == "aliased_import" and child.named_children:
+                usings.append(_node_text(child.named_children[0], src_bytes).split(".")[0])
+
+    for node in _find_all(root, lambda n: n.type == "import_from_statement"):
+        module_node = node.child_by_field_name("module_name")
+        if module_node:
+            usings.append(_node_text(module_node, src_bytes).lstrip(".").split(".")[0])
+
+    return {
+        "namespace":    "",
+        "class_names":  _dedupe(class_names),
+        "method_names": _dedupe(method_names),
+        "base_types":   _dedupe(base_types),
+        "call_sites":   _dedupe(call_sites),
+        "method_sigs":  _dedupe(method_sigs),
+        "type_refs":    _dedupe(type_refs),
+        "attributes":   _dedupe(attributes),
+        "usings":       _dedupe(usings),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -348,6 +467,8 @@ def build_document(full_path: str, relative_path: str) -> dict:
     ext = os.path.splitext(full_path)[1].lower()
     if ext == ".cs":
         meta = extract_cs_metadata(src_bytes)
+    elif ext == ".py" and _PY_AVAILABLE:
+        meta = extract_py_metadata(src_bytes)
     else:
         meta = {
             "namespace": "", "class_names": [], "method_names": [],
